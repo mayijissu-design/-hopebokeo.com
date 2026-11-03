@@ -87,6 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
   ];
 
   return (
+    <>
     <header className="bg-white/70 dark:bg-slate-900/75 backdrop-blur-md border-b border-white/30 dark:border-slate-800/60 sticky top-0 z-40 transition-colors w-full">
       <div className="w-full pl-3 sm:pl-6 lg:pl-8 pr-3 sm:pr-6 lg:pr-8 h-16 sm:h-18 flex items-center justify-between gap-3">
         {/* Logo & Title matching exact mockup design */}
@@ -215,81 +216,84 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
+    </header>
 
-      {/* Mobile Right Drawer Slide-over */}
-      {isMobileMenuOpen && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 sm:hidden animate-fade-in"
-            onClick={() => setIsMobileMenuOpen(false)}
-          />
+    {/* Mobile Right Drawer Slide-over (placed outside <header> so backdrop-filter does not constrain fixed positioning) */}
+    {isMobileMenuOpen && (
+      <>
+        {/* Full-screen Backdrop */}
+        <div
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-[90] sm:hidden animate-fade-in"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
 
-          {/* Right-aligned Vertical Navigation Drawer */}
-          <div className="fixed top-0 right-0 h-full w-72 bg-white dark:bg-slate-900 shadow-2xl z-50 p-5 border-l border-slate-200 dark:border-slate-800 flex flex-col justify-between sm:hidden animate-fade-in transition-all rounded-l-2xl">
-            <div className="space-y-6">
-              {/* Drawer Header */}
-              <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <HbLogo logoUrl={logoUrl} className="h-8 w-auto text-[#ee1c25]" />
-                  <span className="font-extrabold text-slate-900 dark:text-white text-base">
-                    {language === 'lo' ? 'ເມນູຫຼັກ' : language === 'th' ? 'เมนูหลัก' : 'Main Menu'}
-                  </span>
-                </div>
-                <button
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+        {/* Right-aligned Vertical Navigation Drawer */}
+        <div className="fixed top-0 right-0 bottom-0 h-[100dvh] w-72 max-w-[82vw] bg-white dark:bg-slate-900 shadow-2xl z-[100] p-5 border-l border-slate-200 dark:border-slate-800 flex flex-col justify-between sm:hidden animate-fade-in transition-all rounded-l-2xl overflow-y-auto">
+          <div className="space-y-5">
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <HbLogo logoUrl={logoUrl} className="h-8 w-auto text-[#ee1c25]" />
+                <span className="font-extrabold text-slate-900 dark:text-white text-base">
+                  {language === 'lo' ? 'ເມນູຫຼັກ' : language === 'th' ? 'เมนูหลัก' : 'Main Menu'}
+                </span>
               </div>
-
-              {/* Vertical Tab Items */}
-              <div className="flex flex-col gap-1.5">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveTab(item.id);
-                        setIsMobileMenuOpen(false);
-                      }}
-                      className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-bold transition text-left ${
-                        isActive
-                          ? 'bg-red-50 dark:bg-red-950/40 text-[#cc0000] dark:text-red-400 font-black border-l-4 border-[#cc0000]'
-                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <Icon className={`w-5 h-5 ${isActive ? 'text-[#cc0000]' : (item.iconColor || 'text-slate-500 dark:text-slate-400')}`} />
-                      <span>{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Drawer Footer */}
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
-              <p className="font-black text-slate-600 dark:text-slate-400 tracking-wider">HOPE BOKEO</p>
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTab('admin');
-                  setIsMobileMenuOpen(false);
-                }}
-                className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition text-[11px] font-medium cursor-pointer"
-                title="Admin Portal"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
               >
-                <Lock className="w-3 h-3 text-slate-400" />
-                <span>{language === 'lo' ? 'ແອັດມິນ' : language === 'th' ? 'แอดมิน' : 'Admin'}</span>
+                <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Vertical Tab Items */}
+            <div className="flex flex-col gap-1.5">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      item.action();
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition text-left cursor-pointer ${
+                      isActive
+                        ? 'bg-red-50 dark:bg-red-950/40 text-[#cc0000] dark:text-red-400 font-black border-l-4 border-[#cc0000] shadow-xs'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'text-[#cc0000] dark:text-red-400' : (item.iconColor || 'text-slate-500 dark:text-slate-400')}`} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </>
-      )}
-    </header>
+
+          {/* Drawer Footer */}
+          <div className="pt-4 mt-6 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
+            <p className="font-black text-slate-600 dark:text-slate-400 tracking-wider">HOPE BOKEO</p>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('admin');
+                setIsMobileMenuOpen(false);
+              }}
+              className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition text-[11px] font-medium cursor-pointer"
+              title="Admin Portal"
+            >
+              <Lock className="w-3 h-3 text-slate-400" />
+              <span>{language === 'lo' ? 'ແອັດມິນ' : language === 'th' ? 'แอดมิน' : 'Admin'}</span>
+            </button>
+          </div>
+        </div>
+      </>
+    )}
+    </>
   );
 };
 

@@ -920,81 +920,81 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       >
         <div
           onClick={() => onNavigateToDashboard && onNavigateToDashboard()}
-          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 cursor-pointer group"
+          className="max-w-7xl mx-auto px-1.5 sm:px-6 lg:px-8 cursor-pointer group"
           title={language === 'lo' ? 'ຄລິກເພື່ອເບິ່ງຂໍ້ມູນເຊິງເລິກທັງໝົດ' : 'Click to view full Insights dashboard'}
         >
-          <div className="bg-[#faf8f5] dark:bg-slate-900/90 py-2 sm:py-3 px-2 sm:px-6">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 sm:gap-3">
+          <div className="bg-[#faf8f5] dark:bg-slate-900/90 py-2 sm:py-3 px-1 sm:px-6">
+            <div className="grid grid-cols-5 gap-1 sm:gap-3 items-center">
               {/* Stat 1: Churches */}
-              <div className="flex items-center gap-3 px-2 sm:px-4 justify-center md:justify-start">
+              <div className="flex items-center gap-1 sm:gap-2.5 md:gap-3 px-0.5 sm:px-2 md:px-4 justify-center md:justify-start min-w-0">
                 <div className="shrink-0 text-[#ee1c25] group-hover:scale-110 transition-transform">
-                  <Church className="w-7 h-7 sm:w-9 sm:h-9 stroke-[1.8]" />
+                  <Church className="w-4 h-4 sm:w-7 sm:h-7 md:w-9 md:h-9 stroke-[1.8]" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs sm:text-xl md:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none truncate">
                     {computedStats.churches}
                   </span>
-                  <span className="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span className="text-[9px] sm:text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">
                     {language === 'lo' ? 'ຄຣິດຕະຈັກ' : language === 'th' ? 'คริสตจักร' : 'Churches'}
                   </span>
                 </div>
               </div>
 
               {/* Stat 2: Heard the Gospel */}
-              <div className="flex items-center gap-3 px-2 sm:px-4 justify-center md:justify-start">
+              <div className="flex items-center gap-1 sm:gap-2.5 md:gap-3 px-0.5 sm:px-2 md:px-4 justify-center md:justify-start min-w-0">
                 <div className="shrink-0 text-[#ee1c25] group-hover:scale-110 transition-transform">
-                  <Users className="w-7 h-7 sm:w-9 sm:h-9 stroke-[1.8]" />
+                  <Users className="w-4 h-4 sm:w-7 sm:h-7 md:w-9 md:h-9 stroke-[1.8]" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs sm:text-xl md:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none truncate">
                     {computedStats.gospelHeard}
                   </span>
-                  <span className="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span className="text-[9px] sm:text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">
                     {language === 'lo' ? 'ໄດ້ຍິນຂ່າວປະເສີດ' : language === 'th' ? 'ได้ยินข่าวประเสริฐ' : 'Heard the Gospel'}
                   </span>
                 </div>
               </div>
 
               {/* Stat 3: Believers */}
-              <div className="flex items-center gap-3 px-2 sm:px-4 justify-center md:justify-start">
+              <div className="flex items-center gap-1 sm:gap-2.5 md:gap-3 px-0.5 sm:px-2 md:px-4 justify-center md:justify-start min-w-0">
                 <div className="shrink-0 text-[#ee1c25] group-hover:scale-110 transition-transform">
-                  <Heart className="w-7 h-7 sm:w-9 sm:h-9 stroke-[1.8]" />
+                  <Heart className="w-4 h-4 sm:w-7 sm:h-7 md:w-9 md:h-9 stroke-[1.8]" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs sm:text-xl md:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none truncate">
                     {computedStats.believers}
                   </span>
-                  <span className="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span className="text-[9px] sm:text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">
                     {language === 'lo' ? 'ຜູ້ເຊື່ອໃໝ່' : language === 'th' ? 'ผู้เชื่อ' : 'Believers'}
                   </span>
                 </div>
               </div>
 
               {/* Stat 4: Baptized */}
-              <div className="flex items-center gap-3 px-2 sm:px-4 justify-center md:justify-start">
+              <div className="flex items-center gap-1 sm:gap-2.5 md:gap-3 px-0.5 sm:px-2 md:px-4 justify-center md:justify-start min-w-0">
                 <div className="shrink-0 text-[#ee1c25] group-hover:scale-110 transition-transform">
-                  <Droplets className="w-7 h-7 sm:w-9 sm:h-9 stroke-[1.8]" />
+                  <Droplets className="w-4 h-4 sm:w-7 sm:h-7 md:w-9 md:h-9 stroke-[1.8]" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs sm:text-xl md:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none truncate">
                     {computedStats.baptized}
                   </span>
-                  <span className="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span className="text-[9px] sm:text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">
                     {language === 'lo' ? 'ຮັບບັບຕິສະມາ' : language === 'th' ? 'รับบัพติศมา' : 'Baptized'}
                   </span>
                 </div>
               </div>
 
               {/* Stat 5: Worshippers */}
-              <div className="col-span-2 md:col-span-1 flex items-center gap-3 px-2 sm:px-4 justify-center md:justify-start">
+              <div className="flex items-center gap-1 sm:gap-2.5 md:gap-3 px-0.5 sm:px-2 md:px-4 justify-center md:justify-start min-w-0">
                 <div className="shrink-0 text-[#ee1c25] group-hover:scale-110 transition-transform">
-                  <UsersRound className="w-7 h-7 sm:w-9 sm:h-9 stroke-[1.8]" />
+                  <UsersRound className="w-4 h-4 sm:w-7 sm:h-7 md:w-9 md:h-9 stroke-[1.8]" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs sm:text-xl md:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white leading-none truncate">
                     {computedStats.worshippers}
                   </span>
-                  <span className="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span className="text-[9px] sm:text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">
                     {language === 'lo' ? 'ສະມາຊິກນະມັດສະການ' : language === 'th' ? 'ผู้นมัสการ' : 'Worshippers'}
                   </span>
                 </div>

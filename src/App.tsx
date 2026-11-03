@@ -475,14 +475,17 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           if (Array.isArray(data.villages) && data.villages.length > 0) {
-            const cleanVillages = data.villages.map((v: any) => ({
-              ...v,
-              heard: Number(v.heard) || 0,
-              believers: Number(v.believers) || 0,
-              baptized: Number(v.baptized) || 0,
-              attending: typeof v.attending === 'number' ? v.attending : (Number(v.attending) || 0),
-              leaders: typeof v.leaders === 'number' ? Math.max(0, v.leaders) : Math.max(0, Number(v.leaders) || 0),
-            }));
+            const cleanVillages = data.villages.map((v: any) => {
+              const rawLeaders = Number(v.leaders) || 0;
+              return {
+                ...v,
+                heard: Number(v.heard) || 0,
+                believers: Number(v.believers) || 0,
+                baptized: Number(v.baptized) || 0,
+                attending: typeof v.attending === 'number' ? v.attending : (Number(v.attending) || 0),
+                leaders: rawLeaders < 0 ? 1 : rawLeaders,
+              };
+            });
             setVillages(cleanVillages);
             try {
               localStorage.setItem('hb_cached_villages', JSON.stringify(cleanVillages));
@@ -619,6 +622,7 @@ export default function App() {
         if (!snapshot.empty) {
           const list = snapshot.docs.map((d) => {
             const data = d.data();
+            const rawLeaders = Number(data.leaders) || 0;
             return {
               id: d.id,
               ...data,
@@ -626,7 +630,7 @@ export default function App() {
               believers: Number(data.believers) || 0,
               baptized: Number(data.baptized) || 0,
               attending: typeof data.attending === 'number' ? data.attending : (Number(data.attending) || 0),
-              leaders: typeof data.leaders === 'number' ? data.leaders : (Number(data.leaders) || 0),
+              leaders: rawLeaders < 0 ? 1 : rawLeaders,
             } as Village;
           });
           setVillages(list);

@@ -299,7 +299,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       const vAllBaptized = Number(v.baptized) || 0;
       const vAllHeard = Number(v.heard) || 0;
       const vAttending = Number(v.attending) || 0;
-      const vLeaders = Number(v.leaders) || 0;
+      const rawLeaders = Number(v.leaders) || 0;
+      const vLeaders = rawLeaders < 0 ? 1 : rawLeaders;
 
       totalAllBelievers += vAllBelievers;
       totalAllBaptized += vAllBaptized;
@@ -388,11 +389,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       const bp = isDateFiltered ? (p?.baptized || 0) : (Number(v.baptized) || 0);
       const h = isDateFiltered ? (p?.heard || 0) : (Number(v.heard) || 0);
 
+      const rawLeaders = Number(v.leaders) || 0;
       districtMap[localizedD].believers += b;
       districtMap[localizedD].baptized += bp;
       districtMap[localizedD].heard += h;
       districtMap[localizedD].attending += Number(v.attending) || 0;
-      districtMap[localizedD].leaders += Number(v.leaders) || 0;
+      districtMap[localizedD].leaders += rawLeaders < 0 ? 1 : rawLeaders;
       districtMap[localizedD].churches += 1;
       totalBelieversCount += b;
     });
@@ -418,6 +420,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       const p = villagePeriodMap[vKey];
       const believers = isDateFiltered ? (p?.believers || 0) : (Number(v.believers) || 0);
       const baptized = isDateFiltered ? (p?.baptized || 0) : (Number(v.baptized) || 0);
+      const rawLeaders = Number(v.leaders) || 0;
       return {
         id: v.id || `${v.rowId}`,
         name,
@@ -427,7 +430,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         baptized,
         baptismRate: believers > 0 ? Math.round((baptized / believers) * 100) : 0,
         attending: Number(v.attending) || 0,
-        leaders: Number(v.leaders) || 0,
+        leaders: rawLeaders < 0 ? 1 : rawLeaders,
       };
     });
 
@@ -561,7 +564,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 space-y-6 sm:space-y-8 animate-fade-in pb-12">
       {/* Quick Stats Summary Card */}
-      <div className="bg-[#0f172a] text-white p-4 sm:p-5 md:p-6 rounded-2xl shadow-md relative overflow-hidden space-y-4 transition-colors">
+      <div className="bg-[#0f172a] text-white p-3.5 sm:p-5 md:p-6 rounded-2xl shadow-md relative overflow-hidden space-y-3.5 sm:space-y-4 transition-colors">
         <div className="relative z-10 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-[#cc0000] text-white flex items-center justify-center font-bold shadow-xs">
@@ -600,12 +603,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
         {showStats && (
           <div className="relative z-10 animate-fade-in">
-            {/* 6 Metric Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+            {/* 6 Metric Cards: 2 rows of 3 boxes on mobile, 1 row of 6 boxes on desktop */}
+            <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3.5">
               {/* Active Churches / Villages */}
-              <div className="bg-[#16274c] hover:bg-[#1b305c] border border-[#233b6e] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
-                <div className="flex items-center justify-center gap-1.5 text-blue-400 text-xs font-bold mb-1">
-                  <Building2 className="w-4 h-4 shrink-0" />
+              <div className="bg-[#16274c] hover:bg-[#1b305c] border border-[#233b6e] rounded-xl p-2.5 sm:p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs min-w-0">
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 text-blue-400 text-[10px] sm:text-xs font-bold mb-1 w-full">
+                  <Building2 className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" />
                   <span className="truncate">
                     {language === 'lo'
                       ? 'ຄິດສະຈັກ/ບ້ານ'
@@ -614,15 +617,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : 'Churches'}
                   </span>
                 </div>
-                <span className="text-xl sm:text-2xl font-black text-white tracking-tight tabular-nums">
+                <span className="text-lg sm:text-2xl font-black text-white tracking-tight tabular-nums leading-tight">
                   <AnimatedCounter value={filteredVillages.length} />
                 </span>
               </div>
 
               {/* Heard Gospel */}
-              <div className="bg-[#2c2823] hover:bg-[#36312a] border border-[#4d4227] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
-                <div className="flex items-center justify-center gap-1.5 text-amber-400 text-xs font-bold mb-1">
-                  <Ear className="w-4 h-4 shrink-0" />
+              <div className="bg-[#2c2823] hover:bg-[#36312a] border border-[#4d4227] rounded-xl p-2.5 sm:p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs min-w-0">
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 text-amber-400 text-[10px] sm:text-xs font-bold mb-1 w-full">
+                  <Ear className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" />
                   <span className="truncate">
                     {language === 'lo'
                       ? isDateFiltered ? 'ໄດ້ຍິນຂ່າວ (ເພີ່ມ)' : 'ໄດ້ຍິນຂ່າວ'
@@ -631,20 +634,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : isDateFiltered ? 'Heard (Added)' : 'Heard'}
                   </span>
                 </div>
-                <span className="text-xl sm:text-2xl font-black text-amber-400 tracking-tight tabular-nums">
+                <span className="text-lg sm:text-2xl font-black text-amber-400 tracking-tight tabular-nums leading-tight">
                   <AnimatedCounter value={stats.heard} />
                 </span>
                 {isDateFiltered && (
-                  <span className="text-[10px] text-slate-400 mt-0.5 block font-semibold truncate">
+                  <span className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5 block font-semibold truncate w-full">
                     {language === 'lo' ? `(ສະສົມ: ${stats.allTimeHeard.toLocaleString()})` : `(Total: ${stats.allTimeHeard.toLocaleString()})`}
                   </span>
                 )}
               </div>
 
               {/* Total Believers */}
-              <div className="bg-[#311f2c] hover:bg-[#3c2536] border border-[#582a3e] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
-                <div className="flex items-center justify-center gap-1.5 text-rose-400 text-xs font-bold mb-1">
-                  <Heart className="w-4 h-4 shrink-0" />
+              <div className="bg-[#311f2c] hover:bg-[#3c2536] border border-[#582a3e] rounded-xl p-2.5 sm:p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs min-w-0">
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 text-rose-400 text-[10px] sm:text-xs font-bold mb-1 w-full">
+                  <Heart className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" />
                   <span className="truncate">
                     {language === 'lo'
                       ? isDateFiltered ? 'ຜູ້ເຊື່ອໃໝ່ (ເພີ່ມ)' : 'ຮັບເຊື່ອແລ້ວ'
@@ -653,20 +656,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : isDateFiltered ? 'New Believers' : 'Believers'}
                   </span>
                 </div>
-                <span className="text-xl sm:text-2xl font-black text-rose-400 tracking-tight tabular-nums">
+                <span className="text-lg sm:text-2xl font-black text-rose-400 tracking-tight tabular-nums leading-tight">
                   <AnimatedCounter value={stats.believers} />
                 </span>
                 {isDateFiltered && (
-                  <span className="text-[10px] text-slate-400 mt-0.5 block font-semibold truncate">
+                  <span className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5 block font-semibold truncate w-full">
                     {language === 'lo' ? `(ສະສົມ: ${stats.allTimeBelievers.toLocaleString()})` : `(Total: ${stats.allTimeBelievers.toLocaleString()})`}
                   </span>
                 )}
               </div>
 
               {/* Total Baptized */}
-              <div className="bg-[#132f32] hover:bg-[#17393d] border border-[#1f4e4b] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
-                <div className="flex items-center justify-center gap-1.5 text-emerald-400 text-xs font-bold mb-1">
-                  <Droplets className="w-4 h-4 shrink-0" />
+              <div className="bg-[#132f32] hover:bg-[#17393d] border border-[#1f4e4b] rounded-xl p-2.5 sm:p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs min-w-0">
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 text-emerald-400 text-[10px] sm:text-xs font-bold mb-1 w-full">
+                  <Droplets className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" />
                   <span className="truncate">
                     {language === 'lo'
                       ? isDateFiltered ? 'ບັບຕິສະມາ (ເພີ່ມ)' : 'ຮັບບັບຕິສະມາ'
@@ -675,20 +678,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : isDateFiltered ? 'Baptized (Added)' : 'Baptized'}
                   </span>
                 </div>
-                <span className="text-xl sm:text-2xl font-black text-emerald-400 tracking-tight tabular-nums">
+                <span className="text-lg sm:text-2xl font-black text-emerald-400 tracking-tight tabular-nums leading-tight">
                   <AnimatedCounter value={stats.baptized} />
                 </span>
                 {isDateFiltered && (
-                  <span className="text-[10px] text-slate-400 mt-0.5 block font-semibold truncate">
+                  <span className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5 block font-semibold truncate w-full">
                     {language === 'lo' ? `(ສະສົມ: ${stats.allTimeBaptized.toLocaleString()})` : `(Total: ${stats.allTimeBaptized.toLocaleString()})`}
                   </span>
                 )}
               </div>
 
               {/* Worship Attendance */}
-              <div className="bg-[#132a42] hover:bg-[#173350] border border-[#1e4568] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
-                <div className="flex items-center justify-center gap-1.5 text-cyan-400 text-xs font-bold mb-1">
-                  <Users className="w-4 h-4 shrink-0" />
+              <div className="bg-[#132a42] hover:bg-[#173350] border border-[#1e4568] rounded-xl p-2.5 sm:p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs min-w-0">
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 text-cyan-400 text-[10px] sm:text-xs font-bold mb-1 w-full">
+                  <Users className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" />
                   <span className="truncate">
                     {language === 'lo'
                       ? 'ນະມັດສະການ'
@@ -697,15 +700,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : 'Worshipers'}
                   </span>
                 </div>
-                <span className="text-xl sm:text-2xl font-black text-cyan-400 tracking-tight tabular-nums">
+                <span className="text-lg sm:text-2xl font-black text-cyan-400 tracking-tight tabular-nums leading-tight">
                   <AnimatedCounter value={stats.attending} />
                 </span>
               </div>
 
               {/* Leaders Trained */}
-              <div className="bg-[#251f42] hover:bg-[#2d2650] border border-[#3d2e68] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
-                <div className="flex items-center justify-center gap-1.5 text-purple-400 text-xs font-bold mb-1">
-                  <GraduationCap className="w-4 h-4 shrink-0" />
+              <div className="bg-[#251f42] hover:bg-[#2d2650] border border-[#3d2e68] rounded-xl p-2.5 sm:p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs min-w-0">
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 text-purple-400 text-[10px] sm:text-xs font-bold mb-1 w-full">
+                  <GraduationCap className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" />
                   <span className="truncate">
                     {language === 'lo'
                       ? 'ຜູ້ອົບຮົມ/ຜູ້ນຳ'
@@ -714,7 +717,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : 'Leaders'}
                   </span>
                 </div>
-                <span className="text-xl sm:text-2xl font-black text-purple-400 tracking-tight tabular-nums">
+                <span className="text-lg sm:text-2xl font-black text-purple-400 tracking-tight tabular-nums leading-tight">
                   <AnimatedCounter value={stats.leaders} />
                 </span>
               </div>
