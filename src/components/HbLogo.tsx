@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getCachedUploadUrl, resolveUploadUrl } from '../utils/fileUploader';
 
 interface HbLogoProps {
   className?: string;
@@ -16,10 +17,10 @@ export const HbLogo: React.FC<HbLogoProps> = ({
   disableDarkOutline = false,
 }) => {
   const [currentLogo, setCurrentLogo] = useState<string>(() => {
-    if (logoUrl) return logoUrl;
+    if (logoUrl) return getCachedUploadUrl(logoUrl);
     try {
       const saved = localStorage.getItem('hb_custom_logo');
-      if (saved) return saved;
+      if (saved) return getCachedUploadUrl(saved);
     } catch {
       // ignore
     }
@@ -27,19 +28,29 @@ export const HbLogo: React.FC<HbLogoProps> = ({
   });
 
   useEffect(() => {
+    let target = '/hb-logo.svg';
     if (logoUrl) {
-      setCurrentLogo(logoUrl);
+      target = logoUrl;
     } else {
       try {
         const saved = localStorage.getItem('hb_custom_logo');
         if (saved) {
-          setCurrentLogo(saved);
-          return;
+          target = saved;
         }
       } catch {
         // ignore
       }
-      setCurrentLogo('/hb-logo.svg');
+    }
+    const cached = getCachedUploadUrl(target);
+    setCurrentLogo(cached);
+    if (target.startsWith('/uploads/') && cached === target) {
+      resolveUploadUrl(target)
+        .then((resolved) => {
+          if (resolved && resolved !== target) {
+            setCurrentLogo(resolved);
+          }
+        })
+        .catch(() => {});
     }
   }, [logoUrl]);
 
@@ -47,12 +58,22 @@ export const HbLogo: React.FC<HbLogoProps> = ({
   useEffect(() => {
     const handleLogoUpdate = (e: any) => {
       if (e?.detail && typeof e.detail === 'string') {
-        setCurrentLogo(e.detail);
+        const target = e.detail;
+        setCurrentLogo(getCachedUploadUrl(target));
+        if (target.startsWith('/uploads/')) {
+          resolveUploadUrl(target)
+            .then((resolved) => {
+              if (resolved && resolved !== target) {
+                setCurrentLogo(resolved);
+              }
+            })
+            .catch(() => {});
+        }
       } else {
         try {
           const saved = localStorage.getItem('hb_custom_logo');
           if (saved) {
-            setCurrentLogo(saved);
+            setCurrentLogo(getCachedUploadUrl(saved));
             return;
           }
         } catch {
@@ -78,7 +99,19 @@ export const HbLogo: React.FC<HbLogoProps> = ({
       } ${className}`}
       style={size ? { height: `${size}px`, width: 'auto' } : undefined}
       onError={() => {
-        if (currentLogo !== '/hb-logo.svg') {
+        if (currentLogo.startsWith('/uploads/')) {
+          resolveUploadUrl(currentLogo)
+            .then((resolved) => {
+              if (resolved && resolved !== currentLogo) {
+                setCurrentLogo(resolved);
+              } else {
+                setCurrentLogo('/hb-logo.svg');
+              }
+            })
+            .catch(() => {
+              setCurrentLogo('/hb-logo.svg');
+            });
+        } else if (currentLogo !== '/hb-logo.svg') {
           setCurrentLogo('/hb-logo.svg');
         }
       }}

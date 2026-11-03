@@ -1,7 +1,11 @@
-import React, { useState, useRef } from "react";
-import { Upload, X, Link, Image as ImageIcon, Loader2 } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { Upload, X, Link, Loader2 } from "lucide-react";
 import { Language } from "../types";
-import { uploadFileDirectly } from "../utils/fileUploader";
+import {
+  uploadFileDirectly,
+  getCachedUploadUrl,
+  resolveUploadUrl,
+} from "../utils/fileUploader";
 
 export interface UnifiedMediaUploaderProps {
   value?: string;
@@ -31,7 +35,27 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [previewSrc, setPreviewSrc] = useState<string>(() =>
+    getCachedUploadUrl(value)
+  );
+  const [previewHidden, setPreviewHidden] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setPreviewHidden(false);
+    const cached = getCachedUploadUrl(value);
+    setPreviewSrc(cached);
+    if (value && value.startsWith("/uploads/") && cached === value) {
+      resolveUploadUrl(value)
+        .then((resolved) => {
+          if (resolved && resolved !== value) {
+            setPreviewSrc(resolved);
+            setPreviewHidden(false);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [value]);
 
   const defaultAccept =
     acceptTypes ||
@@ -41,7 +65,7 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
       ? ".pdf,.doc,.docx,.txt"
       : fileType === "all"
       ? "*/*"
-      : "image/*");
+      : "image/*,.svg,.png,.webp,.jpg,.jpeg,.gif,.bmp,.avif,.heic,.heif,.jfif,.tif,.tiff");
 
   const defaultPlaceholder =
     placeholder ||
@@ -58,6 +82,7 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
     try {
       setIsUploading(true);
       setUploadError(null);
+      setPreviewHidden(false);
 
       const result = await uploadFileDirectly(file);
       if (result.success && result.url) {
@@ -77,7 +102,9 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
         };
         reader.readAsDataURL(file);
       } catch (fallbackErr) {
-        setUploadError(language === "lo" ? "ການອັບໂຫຼດຂັດຂ້ອງ" : "Upload error");
+        setUploadError(
+          language === "lo" ? "ການອັບໂຫຼດຂັດຂ້ອງ" : "Upload error"
+        );
       }
     } finally {
       setIsUploading(false);
@@ -90,12 +117,14 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
   const handleClear = () => {
     onChange("");
     setUploadError(null);
+    setPreviewHidden(false);
   };
 
   const isImageValue =
     value &&
     (value.startsWith("data:image") ||
-      /\.(jpeg|jpg|png|webp|svg|gif)($|\?)/i.test(value) ||
+      value.startsWith("blob:") ||
+      /\.(jpeg|jpg|png|webp|svg|gif|bmp|avif|jfif)($|\?)/i.test(value) ||
       value.startsWith("/uploads/") ||
       value.includes("images.unsplash.com") ||
       value.includes("firebasestorage") ||
@@ -139,20 +168,22 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
             ref={fileInputRef}
             type="file"
             accept={defaultAccept}
-            disabled={disabled || isUploading}
+            disabled={isUploading}
             onChange={handleFileChange}
             className="hidden"
           />
           <button
             type="button"
-            disabled={disabled || isUploading}
+            disabled={isUploading}
             onClick={() => fileInputRef.current?.click()}
             className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition active:scale-95 disabled:opacity-50 cursor-pointer"
           >
             {isUploading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-red-500" />
-                <span>{language === "lo" ? "ກຳລັງອັບໂຫຼດ..." : "Uploading..."}</span>
+                <span>
+                  {language === "lo" ? "ກຳລັງອັບໂຫຼດ..." : "Uploading..."}
+                </span>
               </>
             ) : (
               <>
@@ -168,14 +199,26 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
         <p className="text-xs text-red-500 font-medium">{uploadError}</p>
       )}
 
-      {isImageValue && (
+      {isImageValue && !previewHidden && (
         <div className="relative inline-block mt-2 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 max-w-[200px] shadow-xs">
           <img
-            src={value}
+            src={previewSrc || value}
             alt="Preview"
             className="max-h-28 object-contain w-auto mx-auto block"
-            onError={(e) => {
-              (e.currentTarget as HTMLElement).style.display = "none";
+            onError={() => {
+              if (value && value.startsWith("/uploads/")) {
+                resolveUploadUrl(value)
+                  .then((resolved) => {
+                    if (resolved && resolved !== value) {
+                      setPreviewSrc(resolved);
+                    } else {
+                      setPreviewHidden(true);
+                    }
+                  })
+                  .catch(() => setPreviewHidden(true));
+              } else {
+                setPreviewHidden(true);
+              }
             }}
           />
         </div>

@@ -262,7 +262,7 @@ interface PosterSettingsSectionProps {
 
 export const PosterSettingsSection: React.FC<PosterSettingsSectionProps> = ({
   language,
-  isEditingPoster,
+  isEditingPoster: _isEditingPosterProp,
   isSavingPoster,
   onSave,
   mode = 'all',
@@ -616,8 +616,9 @@ export const PosterSettingsSection: React.FC<PosterSettingsSectionProps> = ({
     setSelectedPosterIndex(0);
   };
 
+  const isEditingPoster = true;
+
   const handleUploadMultiplePosterFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!isEditingPoster) return;
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -626,18 +627,22 @@ export const PosterSettingsSection: React.FC<PosterSettingsSectionProps> = ({
       const newUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (file.type.startsWith('image/')) {
-          try {
-            const uploadRes = await uploadFileDirectly(file);
-            if (uploadRes?.url) {
-              newUrls.push(uploadRes.url);
-            }
-          } catch (uploadErr) {
-            console.warn('Direct upload failed, falling back to compression:', uploadErr);
-            const compressed = await compressImageFile(file, 2560, 0.95, 750000);
-            if (compressed) {
-              newUrls.push(compressed);
-            }
+        if (!file) continue;
+        try {
+          const uploadRes = await uploadFileDirectly(file);
+          if (uploadRes?.url) {
+            newUrls.push(uploadRes.url);
+          }
+        } catch (uploadErr) {
+          console.warn('Direct upload fallback to original data URL:', uploadErr);
+          const rawDataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string) || '');
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(file);
+          });
+          if (rawDataUrl) {
+            newUrls.push(rawDataUrl);
           }
         }
       }
@@ -660,7 +665,7 @@ export const PosterSettingsSection: React.FC<PosterSettingsSectionProps> = ({
   };
 
   const handleAddImageUrl = () => {
-    if (!isEditingPoster || !urlInputValue.trim()) return;
+    if (!urlInputValue.trim()) return;
     const cleanUrl = urlInputValue.trim();
     const existing = posterImageUrls.filter((u) => u && typeof u === 'string' && u.trim());
     const updated = [...existing, cleanUrl];
@@ -767,7 +772,7 @@ export const PosterSettingsSection: React.FC<PosterSettingsSectionProps> = ({
               ref={posterFileInputRef}
               onChange={handleUploadMultiplePosterFiles}
               multiple
-              accept="image/*"
+              accept="image/*,.jpg,.jpeg,.png,.webp,.svg,.gif,.bmp,.avif,.heic,.heif,.jfif,.tif,.tiff"
               className="hidden"
             />
 

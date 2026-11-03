@@ -158,7 +158,6 @@ app.get('/uploads/:filename', async (req, res, next) => {
             const buf = Buffer.from(fullBase64, 'base64');
             try {
               fs.writeFileSync(publicPath, buf);
-              fs.writeFileSync(dataPath, buf);
             } catch {}
             res.setHeader('Content-Type', fileData.mimeType || 'application/octet-stream');
             return res.send(buf);
@@ -167,7 +166,6 @@ app.get('/uploads/:filename', async (req, res, next) => {
           const buf = Buffer.from(fileData.data, 'base64');
           try {
             fs.writeFileSync(publicPath, buf);
-            fs.writeFileSync(dataPath, buf);
           } catch {}
           res.setHeader('Content-Type', fileData.mimeType || 'application/octet-stream');
           return res.send(buf);
@@ -178,28 +176,7 @@ app.get('/uploads/:filename', async (req, res, next) => {
     }
 
     if (filename.toLowerCase().endsWith('.pdf')) {
-      // 1. Check if matching real PDF exists in dataUploadsDir
-      if (fs.existsSync(dataUploadsDir)) {
-        const files = fs.readdirSync(dataUploadsDir).filter((f) => f.toLowerCase().endsWith('.pdf'));
-        const cleanName = filename.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const found = files.find((f) => {
-          const fClean = f.toLowerCase().replace(/[^a-z0-9]/g, '');
-          return fClean.includes(cleanName.slice(0, 15)) || cleanName.includes(fClean.slice(0, 15));
-        });
-        const targetPdf = found || (files.length > 0 ? files[0] : null);
-        if (targetPdf) {
-          const targetPath = path.join(dataUploadsDir, targetPdf);
-          if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 1000) {
-            try {
-              fs.copyFileSync(targetPath, publicPath);
-            } catch {}
-            res.setHeader('Content-Type', 'application/pdf');
-            return res.sendFile(targetPath);
-          }
-        }
-      }
-
-      // 2. Check Firestore uploaded_files for any valid non-empty PDF
+      // Check Firestore uploaded_files for any valid non-empty PDF
       try {
         const snap = await getDocs(collection(db, 'uploaded_files'));
         for (const d of snap.docs) {
@@ -208,7 +185,6 @@ app.get('/uploads/:filename', async (req, res, next) => {
             const buf = Buffer.from(dData.data, 'base64');
             try {
               fs.writeFileSync(publicPath, buf);
-              fs.writeFileSync(dataPath, buf);
             } catch {}
             res.setHeader('Content-Type', 'application/pdf');
             return res.send(buf);
@@ -232,11 +208,23 @@ const uploadStorage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || '';
-    const safeBase = path.basename(file.originalname, ext)
-      .replace(/[^a-zA-Z0-9_\u0E80-\u0EFF-]/g, '_')
-      .slice(0, 40);
-    const uniqueName = `${safeBase || 'doc'}_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
+    let ext = (path.extname(file.originalname) || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+    if (!ext) {
+      const mime = (file.mimetype || '').toLowerCase();
+      if (mime.includes('png')) ext = '.png';
+      else if (mime.includes('webp')) ext = '.webp';
+      else if (mime.includes('svg')) ext = '.svg';
+      else if (mime.includes('gif')) ext = '.gif';
+      else if (mime.includes('pdf')) ext = '.pdf';
+      else ext = '.jpg';
+    }
+    const safeBase = path
+      .basename(file.originalname, path.extname(file.originalname))
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+      .slice(0, 32);
+    const uniqueName = `${safeBase || 'img'}_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
     cb(null, uniqueName);
   },
 });
@@ -293,14 +281,18 @@ app.get('/api/version', (req, res) => {
 
 // High-speed file upload endpoint: supports direct multipart binary streaming AND base64 fallback
 app.post('/api/upload-file', uploadHandler.single('file') as any, async (req, res) => {
-  // 1. Direct binary file upload via multipart/form-data (fastest, no memory bloat)
+  // 1. Direct binary file upload via multipart/form-data (fastest, 100% original bytes, no memory bloat)
   if (req.file) {
     const relativeUrl = `/uploads/${req.file.filename}`;
     try {
       const diskPath = path.join(uploadsDir, req.file.filename);
       if (fs.existsSync(diskPath)) {
         const buf = fs.readFileSync(diskPath);
-        await persistUploadedFile(req.file.filename, buf, req.file.mimetype || 'application/octet-stream');
+        persistUploadedFile(
+          req.file.filename,
+          buf,
+          req.file.mimetype || 'application/octet-stream'
+        ).catch((e) => console.warn('Async Firestore backup notice:', e));
       }
     } catch (e) {
       console.warn('Backup upload warn:', e);

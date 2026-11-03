@@ -296,11 +296,13 @@ export async function emergencyCompressObject(obj: any): Promise<any> {
   return await compressWalk(safe);
 }
 
+import { saveBase64ToFirestoreUploadedFiles } from './fileUploader';
+
 /**
  * Helper to convert heavy base64 strings to permanent uncompressed server URLs
  * preserving 100% original resolution without Firestore size penalties.
  * If backend server is unavailable (e.g. static hosting on Netlify), it writes
- * directly to Cloud Firestore `uploaded_files`.
+ * directly to Cloud Firestore `uploaded_files` (and `uploaded_file_chunks` for large files).
  */
 async function convertBase64ToUploadUrl(base64Str: string, namePrefix = 'poster'): Promise<string> {
   if (!base64Str || typeof base64Str !== 'string' || !base64Str.startsWith('data:image')) {
@@ -317,7 +319,8 @@ async function convertBase64ToUploadUrl(base64Str: string, namePrefix = 'poster'
         fileName: `${namePrefix}_${Date.now()}`,
       }),
     });
-    if (res.ok) {
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
       const data = await res.json();
       if (data.success && data.url) {
         return data.url;
@@ -327,31 +330,9 @@ async function convertBase64ToUploadUrl(base64Str: string, namePrefix = 'poster'
     // Backend offline or static hosting
   }
 
-  // 2. Direct Cloud Firestore uploaded_files backup (retains 100% original crisp clarity on Netlify / Vercel)
+  // 2. Direct Cloud Firestore uploaded_files + uploaded_file_chunks backup (retains 100% original crisp clarity on Netlify / Vercel)
   try {
-    const match = base64Str.match(/^data:([^;]+);base64,(.+)$/);
-    if (match) {
-      const mime = match[1];
-      const rawBase64 = match[2];
-      const ext = mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg';
-      const filename = `${namePrefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
-      const docId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-      await setDoc(
-        doc(db, 'uploaded_files', docId),
-        {
-          filename,
-          mimeType: mime,
-          data: rawBase64,
-          size: Math.round(rawBase64.length * 0.75),
-          isChunked: false,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-
-      return `/uploads/${filename}`;
-    }
+    return await saveBase64ToFirestoreUploadedFiles(base64Str, namePrefix);
   } catch (firestoreErr) {
     console.warn('Direct Firestore upload error:', firestoreErr);
   }

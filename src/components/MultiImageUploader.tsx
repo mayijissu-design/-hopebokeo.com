@@ -34,18 +34,22 @@ export const MultiImageUploader: React.FC<MultiImageUploaderProps> = ({
       const newUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (file.type.startsWith('image/')) {
-          try {
-            const uploadRes = await uploadFileDirectly(file);
-            if (uploadRes?.url) {
-              newUrls.push(uploadRes.url);
-            }
-          } catch (uploadErr) {
-            console.warn('Direct upload failed, falling back to high-res compression:', uploadErr);
-            const compressed = await compressImageFile(file, 2000, 0.92);
-            if (compressed) {
-              newUrls.push(compressed);
-            }
+        if (!file) continue;
+        try {
+          const uploadRes = await uploadFileDirectly(file);
+          if (uploadRes?.url) {
+            newUrls.push(uploadRes.url);
+          }
+        } catch (uploadErr) {
+          console.warn('Direct upload failed, reading raw original data URL:', uploadErr);
+          const rawDataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string) || '');
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(file);
+          });
+          if (rawDataUrl) {
+            newUrls.push(rawDataUrl);
           }
         }
       }

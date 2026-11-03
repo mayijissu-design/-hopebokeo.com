@@ -1426,7 +1426,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
           hideVisionMission: hideVisionMissionState,
         }).catch((err) => console.warn('Sync donationInfo vision/mission error:', err));
       }
-      setIsEditingPoster(false);
+      setIsEditingPoster(true);
       setPinSavedToast(
         language === 'lo'
           ? 'ອັບເດດໂປສເຕີ ແລະ ພື້ນຫຼັງໜ້າຫຼັກສຳເລັດແລ້ວ!'
