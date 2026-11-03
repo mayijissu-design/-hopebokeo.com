@@ -70,20 +70,6 @@ async function getPdfJsEngine(): Promise<any> {
     console.warn('PDF.js dynamic CDN load notice:', err);
   }
 
-  // 4. Fallback to bundled module
-  try {
-    const mod = await import('pdfjs-dist');
-    if (mod) {
-      const lib = (mod as any).default || mod;
-      if (!lib.GlobalWorkerOptions?.workerSrc) {
-        lib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
-      }
-      return lib;
-    }
-  } catch (err) {
-    console.warn('PDF.js dynamic import notice:', err);
-  }
-
   return null;
 }
 

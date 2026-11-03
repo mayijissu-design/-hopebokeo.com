@@ -11,7 +11,11 @@ export const DEFAULT_BOKEO_TIMELINE: MinistryTimelineItem[] = [
     description: 'ເລີ່ມຕົ້ນການເດີນທາງຮັບໃຊ້ດ້ວຍກຸ່ມອະທິຖານ ແລະ ຜູ້ເຊື່ອຂະໜາດນ້ອຍ ທີ່ໄດ້ຮັບພາລະໃຈໃນການນຳເອົາຄວາມຮັກຂອງພຣະຄຣິດ ແລະ ຄວາມຫວັງໄປສູ່ຊຸມຊົນ ແລະ ໝູ່ບ້ານຫ່າງໄກສອກຫຼີກໃນແຂວງບໍ່ແກ້ວ.',
     descriptionEn: 'The ministry began with humble prayer gatherings and local servants carrying a vision to bring the living hope and love of Christ to remote villages across Bokeo Province.',
     descriptionTh: 'เริ่มต้นการเดินทางรับใช้ด้วยกลุ่มอธิษฐานและกลุ่มผู้เชื่อกลุ่มเล็กๆ ที่มีภาระใจนำความรักและความหวังของพระคริสต์ไปสู่ชุมชนและหมู่บ้านห่างไกลในแขวงบ่อแก้ว',
-    imageUrl: 'https://images.unsplash.com/photo-1469571486292-0ba58a3f068b?q=80&w=1200',
+    imageUrl: '/uploads/timeline_0_0_1790760136842.jpg',
+    imageUrls: [
+      '/uploads/timeline_0_0_1790760136842.jpg',
+      '/uploads/timeline_0_1_1790760137172.jpg',
+    ],
     order: 1,
   },
   {
@@ -24,7 +28,11 @@ export const DEFAULT_BOKEO_TIMELINE: MinistryTimelineItem[] = [
     description: 'ເລີ່ມຕົ້ນການບັບຕິສະມາຜູ້ເຊື່ອໃໝ່ ແລະ ສ້າງຕັ້ງກຸ່ມນະມັດສະການຕາມບ້ານ (Home Churches) ໃນເຂດເມືອງຫ້ວຍຊາຍ ແລະ ເມືອງຕົ້ນເຜິ້ງ ພ້ອມທັງເລີ່ມຝຶກອົບຮົມຜູ້ນຳທ້ອງຖິ່ນໃຫ້ສາມາດລ້ຽງດູຝູງແກະໄດ້.',
     descriptionEn: 'Baptisms and new house worship groups emerged in Huayxai and Tonpheung districts, accompanied by monthly mentoring and leadership training for local church planters.',
     descriptionTh: 'เริ่มการบัพติศมาผู้เชื่อใหม่ และก่อตั้งกลุ่มนมัสการตามบ้านในเมืองห้วยทรายและเมืองต้นผึ้ง พร้อมฝึกอบรมผู้นำท้องถิ่น',
-    imageUrl: 'https://images.unsplash.com/photo-1511632765486-a01980e01a18?q=80&w=1200',
+    imageUrl: '/uploads/timeline_1_0_1790760137428.jpg',
+    imageUrls: [
+      '/uploads/timeline_1_0_1790760137428.jpg',
+      '/uploads/timeline_1_1_1790760137837.jpg',
+    ],
     order: 2,
   },
   {
@@ -37,7 +45,8 @@ export const DEFAULT_BOKEO_TIMELINE: MinistryTimelineItem[] = [
     description: 'ຂະຫຍາຍພັນທະກິດສູ່ການຊ່ວຍເຫຼືອສັງຄົມ, ການສອນໜັງສື, ການສະໜັບສະໜູນເດັກກຳພ້າ, ຊ່ວຍເຫຼືອຜູ້ເຈັບປ່ວຍ ແລະ ຢືນຄຽງຂ້າງພີ່ນ້ອງທີ່ຖືກຂົ່ມເຫັງຍ້ອນຄວາມເຊື່ອ.',
     descriptionEn: 'Expanded practical humanitarian outreach: educational tutoring, orphan support, relief care for afflicted families, and standing with persecuted brothers and sisters.',
     descriptionTh: 'ขยายพันธกิจสู่การช่วยเหลือสังคม การสอนหนังสือ การสนับสนุนเด็กกำพร้า และการช่วยเหลือผู้ยากลำบาก',
-    imageUrl: 'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?q=80&w=1200',
+    imageUrl: '/uploads/timeline_2_0_1790760138092.jpg',
+    imageUrls: ['/uploads/timeline_2_0_1790760138092.jpg'],
     order: 3,
   },
   {
@@ -47,10 +56,14 @@ export const DEFAULT_BOKEO_TIMELINE: MinistryTimelineItem[] = [
     title: 'ການເຊື່ອມໂຍງຄົບ 5 ເມືອງທົ່ວແຂວງບໍ່ແກ້ວ',
     titleEn: 'Connecting Across All 5 Districts of Bokeo',
     titleTh: 'การเชื่อมโยงครบ 5 เมืองทั่วแขวงบ่อแก้ว',
-    description: 'ເຊື່ອມໂຍງເຄືອຂ່າຍຜູ້ຮັບໃຊ້, ຄຣິດຕະຈັກ ແລະ ກຸ່ມແຄຣ໌ທົ່ວ 5 ເມືອງ (ຫ້ວຍຊາຍ, ຕົ້ນເຜິ້ງ, ຜາອຸດົມ, ປາກທາ, ແລະ ເມັກ) ຜ່ານແພລດຟອມ HOPE BOKEO ເພື່ອການຕິດຕາມ ແລະ ການເຕີບໂຕທີ່ຍືນຍົງ.',
+    description: 'ເຊື່ອມໂຍງເຄືອຂ່າຍຜູ້ຮັບໃຊ້, ຄຣິດຕະຈັກ ແລະ ກຸ່ມແຄຣ໌ທົ່ວ 5 ເມືອງ (ຫ້ວຍຊາຍ, ຕົ້ນເຜິ້ງ, ຜາອຸດົມ, ປາກທາ, ແລະ ເມິງ) ຜ່ານແພລດຟອມ HOPE BOKEO ເພື່ອການຕິດຕາມ ແລະ ການເຕີບໂຕທີ່ຍືນຍົງ.',
     descriptionEn: 'Uniting church planters, leaders, and care groups across Huayxai, Tonpheung, Pha Oudom, Paktha, and Meung via the centralized HOPE BOKEO platform for enduring fruitfulness.',
     descriptionTh: 'เชื่อมโยงเครือข่ายผู้รับใช้ คริสตจักร และกลุ่มแคร์ทั่วทั้ง 5 เมืองของแขวงบ่อแก้ว ผ่านแพลตฟอร์ม HOPE BOKEO เพื่อการเติบโตอย่างยั่งยืน',
-    imageUrl: 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?q=80&w=1200',
+    imageUrl: '/uploads/timeline_3_0_1790760138340.jpg',
+    imageUrls: [
+      '/uploads/timeline_3_0_1790760138340.jpg',
+      '/uploads/timeline_3_1_1790760138587.jpg',
+    ],
     order: 4,
   },
 ];

@@ -73,10 +73,10 @@ export const ChartsView: React.FC<ChartsViewProps> = ({ headers, rows, language 
   }
 
   return (
-    <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
+    <div className="bg-white border border-slate-100 rounded-none p-6 shadow-sm space-y-6">
       <div className="flex items-center justify-between border-b border-slate-100 pb-4">
         <div className="flex items-center gap-2">
-          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-none">
             <TrendingUp className="w-5 h-5" />
           </div>
           <div>
@@ -92,7 +92,7 @@ export const ChartsView: React.FC<ChartsViewProps> = ({ headers, rows, language 
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Bar Chart */}
-        <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-100 space-y-3">
+        <div className="bg-slate-50/70 p-5 rounded-none border border-slate-100 space-y-3">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
             <BarChart3 className="w-4 h-4 text-indigo-600" />
             <span>{language === 'la' ? 'ກຣາຟເສົາ (Bar Chart)' : 'Bar Chart'}</span>
@@ -105,16 +105,16 @@ export const ChartsView: React.FC<ChartsViewProps> = ({ headers, rows, language 
                 <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
                 <Tooltip
                   formatter={(val: any) => [typeof val === 'number' ? formatNumber(val) : val]}
-                  contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '0.75rem', color: '#0f172a', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '0px', color: '#0f172a', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
-                <Bar dataKey="value" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="value" fill="#4f46e5" radius={[0, 0, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Pie Chart */}
-        <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-100 space-y-3">
+        <div className="bg-slate-50/70 p-5 rounded-none border border-slate-100 space-y-3">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
             <PieIcon className="w-4 h-4 text-indigo-600" />
             <span>{language === 'la' ? 'ກຣາຟວົງມົນ (Distribution)' : 'Data Distribution'}</span>

@@ -189,6 +189,12 @@ export interface HomePoster {
   bokeoTitle?: string;
   bokeoTitleEn?: string;
   bokeoTitleTh?: string;
+  bokeoSubtitle?: string;
+  bokeoSubtitleEn?: string;
+  bokeoSubtitleTh?: string;
+  bokeoShortIntro?: string;
+  bokeoShortIntroEn?: string;
+  bokeoShortIntroTh?: string;
   bokeoDesc?: string;
   bokeoDescEn?: string;
   bokeoDescTh?: string;
@@ -199,6 +205,19 @@ export interface HomePoster {
   buttonText?: string;
   buttonTextEn?: string;
   buttonTextTh?: string;
+  videoBtnText?: string;
+  videoBtnTextEn?: string;
+  videoBtnTextTh?: string;
+  posterLocationTag?: string;
+  posterLocationTagEn?: string;
+  posterLocationTagTh?: string;
+  badgeTopText?: string;
+  badgeTopTextEn?: string;
+  badgeTopTextTh?: string;
+  badgeBottomText?: string;
+  badgeBottomTextEn?: string;
+  badgeBottomTextTh?: string;
+  hideRightBadge?: boolean;
   linkUrl?: string;
   bgColor?: string;
   bgImageUrl?: string;
@@ -239,6 +258,15 @@ export interface HomePoster {
   bokeoTimelineTitleTh?: string;
   hideBokeoTimeline?: boolean;
 
+  // Vision & Mission (ວິໄສທັດ ແລະ ພັນທະກິດ)
+  vision?: string;
+  visionEn?: string;
+  visionTh?: string;
+  mission?: string;
+  missionEn?: string;
+  missionTh?: string;
+  hideVisionMission?: boolean;
+
   // Upcoming Event / Announcement (ງານທີ່ຈະມາເຖິງ / ແຈ້ງການ & ປະກາດ)
   upcomingEventTitle?: string;
   upcomingEventTitleEn?: string;
@@ -275,6 +303,148 @@ export interface HomePoster {
   upcomingTableAlign?: 'left' | 'center' | 'right';
   upcomingBgVisibility?: number;
   upcomingContentBgOpacity?: number;
+  // Communities, Churches & Map Section Content (ບ່ອນພຣະເຈົ້າກຳລັງເຄື່ອນໄຫວ / Communities, Churches. Lasting Change.)
+  mapSectionBadge?: string;
+  mapSectionBadgeEn?: string;
+  mapSectionBadgeTh?: string;
+  mapSectionTitle?: string;
+  mapSectionTitleEn?: string;
+  mapSectionTitleTh?: string;
+  mapSectionDesc?: string;
+  mapSectionDescEn?: string;
+  mapSectionDescTh?: string;
+  hideMapSectionDesc?: boolean;
+  mapSectionButtonText?: string;
+  mapSectionButtonTextEn?: string;
+  mapSectionButtonTextTh?: string;
+
+  // Stories From The Field Content (ເລື່ອງລາວຈາກພາກສະໜາມ / Real People. Real Hope.)
+  storiesBadgeText?: string;
+  storiesBadgeTextEn?: string;
+  storiesBadgeTextTh?: string;
+  storiesTitle?: string;
+  storiesTitleEn?: string;
+  storiesTitleTh?: string;
+  storiesDesc?: string;
+  storiesDescEn?: string;
+  storiesDescTh?: string;
+  hideStoriesDesc?: boolean;
+  storiesButtonText?: string;
+  storiesButtonTextEn?: string;
+  storiesButtonTextTh?: string;
+
+  // Prayer Section & Needs Settings (ການຕັ້ງຄ່າໜ້າອະທິຖານ / Prayer Page Settings)
+  hidePrayerSection?: boolean;
+  prayerBadgeText?: string;
+  prayerBadgeTextEn?: string;
+  prayerBadgeTextTh?: string;
+  prayerTitle?: string;
+  prayerTitleEn?: string;
+  prayerTitleTh?: string;
+  prayerSubtitle?: string;
+  prayerSubtitleEn?: string;
+  prayerSubtitleTh?: string;
+  prayerButtonText?: string;
+  prayerButtonTextEn?: string;
+  prayerButtonTextTh?: string;
+  prayerBgImageUrl?: string;
+  prayerPrayingCountSuffix?: string;
+  prayerPrayingCountSuffixEn?: string;
+  prayerPrayingCountSuffixTh?: string;
+
+  // 3 Floating Prayer Cards on Home Section
+  prayerCard1Title?: string;
+  prayerCard1TitleEn?: string;
+  prayerCard1TitleTh?: string;
+  prayerCard1Subtitle?: string;
+  prayerCard1SubtitleEn?: string;
+  prayerCard1SubtitleTh?: string;
+  prayerCard1Count?: number;
+
+  prayerCard2Title?: string;
+  prayerCard2TitleEn?: string;
+  prayerCard2TitleTh?: string;
+  prayerCard2Subtitle?: string;
+  prayerCard2SubtitleEn?: string;
+  prayerCard2SubtitleTh?: string;
+  prayerCard2Count?: number;
+
+  prayerCard3Title?: string;
+  prayerCard3TitleEn?: string;
+  prayerCard3TitleTh?: string;
+  prayerCard3Subtitle?: string;
+  prayerCard3SubtitleEn?: string;
+  prayerCard3SubtitleTh?: string;
+  prayerCard3Count?: number;
+
+  // Prayer Modal Full Content
+  prayerModalTitle?: string;
+  prayerModalTitleEn?: string;
+  prayerModalTitleTh?: string;
+  prayerModalSubtitle?: string;
+  prayerModalSubtitleEn?: string;
+  prayerModalSubtitleTh?: string;
+  prayerModalItems?: PrayerTopicItem[];
+
+  // Dynamic Prayer Boxes on Home Section (can add or remove in Settings)
+  prayerBoxes?: PrayerBoxItem[];
+
+  // Insights (Dashboard) Tab Hero Poster Settings (ການຕັ້ງຄ່າໂພສເຕີຫ້ອງຂໍ້ມູນ)
+  hideInsightsPoster?: boolean;
+  insightsImageUrl?: string;
+  insightsPosterHeight?: number;
+  insightsPosterOverlayOpacity?: number;
+  insightsPosterEdgeFade?: number;
+  insightsPosterDim?: number;
+  insightsPosterScale?: number;
+  insightsPosterPosition?: string;
+  insightsPosterFit?: 'cover' | 'contain' | 'fill' | 'scale-down';
+  insightsTitle?: string;
+  insightsTitleEn?: string;
+  insightsTitleTh?: string;
+  insightsSubtitle?: string;
+  insightsSubtitleEn?: string;
+  insightsSubtitleTh?: string;
+  insightsVerse?: string;
+  insightsVerseEn?: string;
+  insightsVerseTh?: string;
+  insightsVerseRef?: string;
+  insightsVerseRefEn?: string;
+  insightsVerseRefTh?: string;
+}
+
+export interface TypedPrayerComment {
+  id: string;
+  authorName?: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface PrayerBoxItem {
+  id: string;
+  title: string;
+  titleEn?: string;
+  titleTh?: string;
+  subtitle: string;
+  subtitleEn?: string;
+  subtitleTh?: string;
+  desc?: string;
+  descEn?: string;
+  descTh?: string;
+  icon?: 'users' | 'shield' | 'heart' | 'church' | 'sparkles' | 'globe' | 'book';
+  count?: number;
+  comments?: TypedPrayerComment[];
+}
+
+export interface PrayerTopicItem {
+  id: string;
+  title: string;
+  titleEn?: string;
+  titleTh?: string;
+  desc: string;
+  descEn?: string;
+  descTh?: string;
+  count?: number;
 }
 
 export type HomePosterSettings = HomePoster;
@@ -301,6 +471,7 @@ export interface MinistryTimelineItem {
   imageUrl?: string;
   imageUrls?: string[];
   order?: number;
+  hidden?: boolean;
 }
 
 export interface UpcomingEventAttachment {
@@ -364,6 +535,7 @@ export interface DonationInfo {
   hidden?: boolean;
   hideDonationSection?: boolean;
   hideVisionMission?: boolean;
+  hidePrayerLine?: boolean;
 }
 
 export interface MinistryData {

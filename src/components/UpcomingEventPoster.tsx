@@ -4,8 +4,10 @@ import {
   MapPin,
   Clock,
   User,
+  Maximize2,
 } from 'lucide-react';
 import { Language, HomePoster, UpcomingScheduleItem } from '../types';
+import { handleImageErrorWithFirestore } from '../utils/imageFallback';
 
 interface UpcomingEventPosterProps {
   language: Language;
@@ -16,6 +18,7 @@ interface UpcomingEventPosterProps {
 export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
   language,
   homePoster,
+  onOpenFlyerModal,
 }) => {
   if (!homePoster || homePoster.hideUpcomingEvent) return null;
 
@@ -66,15 +69,15 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
   const heightScale = rawHeight > 100 ? Math.min(100, Math.round(rawHeight / 7.5)) : Math.max(0, Math.min(100, rawHeight));
   const heightRatio = heightScale / 100;
 
-  // Dynamic vertical padding: scales from 6px at 0% to 56px at 100%
-  const paddingY = Math.round(6 + heightRatio * 50);
-  // Dynamic content gap: scales from 6px at 0% to 24px at 100%
-  const contentGap = Math.round(6 + heightRatio * 18);
-  // Dynamic table cell padding: scales from 3px (compact) to 12px (spacious)
-  const cellPaddingY = Math.round(3 + heightRatio * 9);
-  const cellPaddingX = Math.round(6 + heightRatio * 10);
-  const cellFontSize = heightScale < 25 ? '0.8rem' : heightScale < 60 ? '0.85rem' : '0.925rem';
-  const tableLineHeight = heightScale < 25 ? '1.25' : '1.45';
+  // Dynamic vertical padding: scales compactly from 4px at 0% to 20px at 100%
+  const paddingY = Math.round(4 + heightRatio * 16);
+  // Dynamic content gap: scales compactly from 4px at 0% to 12px at 100%
+  const contentGap = Math.round(4 + heightRatio * 8);
+  // Dynamic table cell padding: scales compactly from 2px (compact) to 6px (comfortable)
+  const cellPaddingY = Math.round(2 + heightRatio * 4);
+  const cellPaddingX = Math.round(5 + heightRatio * 6);
+  const cellFontSize = heightScale < 25 ? '0.78rem' : heightScale < 60 ? '0.82rem' : '0.88rem';
+  const tableLineHeight = heightScale < 25 ? '1.2' : '1.3';
 
   // Title Size (ຂະໜາດຫົວຂໍ້ອີເວັນ: Default 28px ຫຼື ປ້ອນຕົວເລກຕາມ MS Word)
   const numericTitleSize = (() => {
@@ -178,39 +181,73 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
       id="upcoming-events-poster"
       className={`relative isolate w-full rounded-none overflow-hidden bg-transparent ${
         isLightBg ? 'text-slate-900' : 'text-white'
-      } transition-all duration-200 select-none flex flex-col justify-center shadow-lg`}
+      } transition-all duration-200 select-none flex flex-col justify-center`}
       style={{
-        minHeight: heightScale > 0 ? `${Math.round(260 + heightRatio * 440)}px` : undefined,
+        minHeight: heightScale > 0 ? `${Math.round(110 + heightRatio * 200)}px` : undefined,
       }}
     >
-      {/* 1. FULL BACKGROUND IMAGE WITH CONFIGURABLE DIM, TOP/BOTTOM EDGE FADE & FADE-TO-WHITE (100 -> 0) */}
+      {/* 1. BACKGROUND LAYER WITH CONFIGURABLE IMAGE, DIM, TOP/BOTTOM EDGE FADE & FADE-TO-WEBSITE/TRANSPARENT (100 -> 0) */}
       <div
-        className="absolute inset-0 z-0 overflow-hidden pointer-events-none bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950"
-        style={maskStyle}
+        className="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-colors duration-300"
+        style={{
+          ...maskStyle,
+          backgroundColor:
+            visibilityRatio === 0
+              ? 'transparent'
+              : undefined,
+        }}
       >
-        <img
-          src={finalBgImage}
-          alt={title || 'Upcoming Event Poster'}
-          className="w-full h-full object-cover object-center scale-100 hover:scale-105 transition-all duration-700 ease-out"
-          style={{ opacity: imageOpacity * visibilityRatio }}
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src = defaultBg;
-          }}
-        />
+        {/* Background gradient only shown when image visibility is active */}
+        {visibilityRatio > 0 && (
+          <div
+            className="absolute inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 transition-opacity duration-300"
+            style={{ opacity: visibilityRatio }}
+          />
+        )}
+
+        {/* Background image: completely hidden when visibilityRatio is 0 */}
+        {visibilityRatio > 0 && imageUrl && (
+          <img
+            src={finalBgImage}
+            alt={title || 'Upcoming Event Poster'}
+            decoding="async"
+            className="w-full h-full object-cover object-center transition-all duration-500 ease-out"
+            style={{
+              opacity: (1 - dimRatio * 0.35) * visibilityRatio,
+              imageRendering: 'auto',
+              WebkitBackfaceVisibility: 'hidden',
+              backfaceVisibility: 'hidden',
+              transform: 'translateZ(0)',
+            }}
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (defaultBg && target.src !== defaultBg && !target.src.endsWith(defaultBg)) {
+                target.src = defaultBg;
+              }
+            }}
+          />
+        )}
+
         {/* Dynamic dark overlay depending on user's Dim setting */}
-        <div
-          className="absolute inset-0 bg-slate-950 transition-opacity duration-300 pointer-events-none"
-          style={{ opacity: dimRatio * visibilityRatio }}
-        />
-        {/* Soft edge gradient to ensure smooth blending */}
-        <div
-          className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-slate-950/30 transition-opacity duration-300 pointer-events-none"
-          style={{ opacity: Math.min(1, dimRatio * 1.1) * visibilityRatio }}
-        />
-        {/* White fade overlay (100 to 0: at 0 it's 100% pure white) */}
+        {visibilityRatio > 0 && dimRatio > 0.05 && (
+          <div
+            className="absolute inset-0 bg-slate-950 transition-opacity duration-300 pointer-events-none"
+            style={{ opacity: dimRatio * 0.7 * visibilityRatio }}
+          />
+        )}
+
+        {/* Soft edge gradient to ensure smooth blending if text is present */}
+        {visibilityRatio > 0 && (title || desc) && (
+          <div
+            className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/20 transition-opacity duration-300 pointer-events-none"
+            style={{ opacity: Math.min(0.85, dimRatio) * visibilityRatio }}
+          />
+        )}
+
+        {/* Website background theme fade overlay (100 -> 0: at 0 it seamlessly blends with the website background #faf8f5 / transparent) */}
         {whiteOverlayOpacity > 0 && (
           <div
-            className="absolute inset-0 bg-white transition-opacity duration-300 pointer-events-none"
+            className="absolute inset-0 bg-[#faf8f5] dark:bg-slate-950 transition-opacity duration-300 pointer-events-none"
             style={{ opacity: whiteOverlayOpacity }}
           />
         )}
@@ -227,7 +264,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
       >
         {/* Centerpiece: Clean Title & Description (No redundant badges or pill buttons) */}
         {(title || desc) && (
-          <div className="space-y-2 max-w-4xl">
+          <div className="space-y-1 sm:space-y-1.5 max-w-4xl">
             {/* Prestigious Event Title (Matches Event title size or custom Word font size) */}
             {title && (
               <h1
@@ -248,7 +285,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
               <p
                 className={`text-xs sm:text-base md:text-lg ${
                   isLightBg ? 'text-slate-700' : 'text-slate-200'
-                } leading-relaxed font-normal whitespace-pre-line max-w-3xl ${isLightBg ? '' : 'drop-shadow-xs'}`}
+                } leading-snug font-normal whitespace-pre-line max-w-3xl ${isLightBg ? '' : 'drop-shadow-xs'}`}
               >
                 {desc}
               </p>
@@ -258,7 +295,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
 
         {/* 3. EVENT TIMETABLE / WORD CONTENT (ບໍ່ມີກອບ ຫຼື ບ໋ອກ - ຕາຕະລາງລອຍເທິງພື້ນຫຼັງ) */}
         {(schedule.length > 0 || scheduleHtml) && (
-          <div className="pt-1 w-full">
+          <div className="pt-0.5 w-full">
             {/* Dynamic CSS injection for table background, cell height & borders based on settings */}
             <style>{`
               #upcoming-events-poster .upcoming-table-view {
@@ -282,6 +319,29 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
               }
               #upcoming-events-poster .upcoming-table-view tr {
                 ${contentOpacity === 0 ? 'background-color: transparent !important;' : ''}
+              }
+              #upcoming-events-poster .upcoming-table-view .rich-word-content p {
+                margin-top: 0.15rem !important;
+                margin-bottom: 0.25rem !important;
+                line-height: 1.35 !important;
+              }
+              #upcoming-events-poster .upcoming-table-view .rich-word-content h1,
+              #upcoming-events-poster .upcoming-table-view .rich-word-content h2,
+              #upcoming-events-poster .upcoming-table-view .rich-word-content h3,
+              #upcoming-events-poster .upcoming-table-view .rich-word-content h4 {
+                margin-top: 0.35rem !important;
+                margin-bottom: 0.2rem !important;
+                line-height: 1.25 !important;
+              }
+              #upcoming-events-poster .upcoming-table-view .rich-word-content ul,
+              #upcoming-events-poster .upcoming-table-view .rich-word-content ol {
+                margin-top: 0.2rem !important;
+                margin-bottom: 0.25rem !important;
+                padding-left: 1.25rem !important;
+              }
+              #upcoming-events-poster .upcoming-table-view .rich-word-content li {
+                margin-top: 0.1rem !important;
+                margin-bottom: 0.1rem !important;
               }
               #upcoming-events-poster .upcoming-table-view .rich-word-content table,
               #upcoming-events-poster .upcoming-table-view .rich-word-content td,
@@ -329,7 +389,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
                       }}
                     >
                       <th
-                        className={`p-3 w-32 sm:w-40 font-black ${
+                        className={`px-3 py-1.5 sm:py-2 w-32 sm:w-40 font-black ${
                           isLightBg ? 'text-[#cc0000]' : 'text-amber-300'
                         }`}
                       >
@@ -339,14 +399,14 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
                         </span>
                       </th>
                       <th
-                        className={`p-3 min-w-[200px] font-black ${
+                        className={`px-3 py-1.5 sm:py-2 min-w-[200px] font-black ${
                           isLightBg ? 'text-slate-900' : 'text-white'
                         }`}
                       >
                         {language === 'lo' ? 'ກິດຈະກຳ / ລາຍການ' : 'Session / Activity'}
                       </th>
                       <th
-                        className={`p-3 min-w-[150px] font-black ${
+                        className={`px-3 py-1.5 sm:py-2 min-w-[150px] font-black ${
                           isLightBg ? 'text-blue-700' : 'text-blue-300'
                         }`}
                       >
@@ -356,7 +416,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
                         </span>
                       </th>
                       <th
-                        className={`p-3 min-w-[150px] font-black ${
+                        className={`px-3 py-1.5 sm:py-2 min-w-[150px] font-black ${
                           isLightBg ? 'text-rose-700' : 'text-rose-300'
                         }`}
                       >
@@ -380,28 +440,28 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
                         }
                       >
                         <td
-                          className={`p-3 font-mono font-bold whitespace-nowrap ${
+                          className={`px-3 py-1.5 sm:py-2 font-mono font-bold whitespace-nowrap ${
                             isLightBg ? 'text-[#cc0000]' : 'text-amber-300'
                           }`}
                         >
                           {item.time}
                         </td>
                         <td
-                          className={`p-3 font-semibold ${
+                          className={`px-3 py-1.5 sm:py-2 font-semibold ${
                             isLightBg ? 'text-slate-900' : 'text-white'
                           }`}
                         >
                           {item.activity}
                         </td>
                         <td
-                          className={`p-3 font-medium ${
+                          className={`px-3 py-1.5 sm:py-2 font-medium ${
                             isLightBg ? 'text-slate-700' : 'text-slate-200'
                           }`}
                         >
                           {item.speaker || '-'}
                         </td>
                         <td
-                          className={`p-3 ${
+                          className={`px-3 py-1.5 sm:py-2 ${
                             isLightBg ? 'text-slate-600' : 'text-slate-200'
                           }`}
                         >
@@ -416,6 +476,30 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
           </div>
         )}
       </div>
+
+      {/* Subtle, restrained wave bottom edge matching reference screenshot */}
+      {visibilityRatio > 0 && (
+        <div className="absolute -bottom-px left-0 right-0 w-full overflow-hidden leading-none pointer-events-none z-20">
+          <svg
+            viewBox="0 0 1440 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className="relative block w-full h-2.5 sm:h-3 text-[#faf8f5] dark:text-slate-950"
+            preserveAspectRatio="none"
+          >
+            <path
+              d="M 0,14 C 180,22 360,22 540,13 C 660,6 800,6 920,13 C 1080,22 1280,22 1440,14 L 1440,24 L 0,24 Z"
+              fill="currentColor"
+            />
+            <path
+              d="M 0,14 C 180,22 360,22 540,13 C 660,6 800,6 920,13 C 1080,22 1280,22 1440,14"
+              stroke="currentColor"
+              strokeOpacity="0.35"
+              strokeWidth="1.5"
+            />
+          </svg>
+        </div>
+      )}
     </section>
   );
 };

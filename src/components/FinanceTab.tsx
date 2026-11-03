@@ -48,12 +48,15 @@ import {
   Loader2
 } from 'lucide-react';
 import { DonationTransaction, TeamDistribution, TeamMember, FinanceQrMember, Language, DonationInfo } from '../types';
+import { initialDefaultFinanceData } from '../data/financeDefaults';
+import initialDefaultFinanceQrMembers from '../data/financeQrDefaults.json';
 import { getLocalizedRole } from '../utils/roleUtils';
 import {
   saveDonationTransactionToFirestore,
   deleteDonationTransactionFromFirestore,
   saveTeamDistributionToFirestore,
   deleteTeamDistributionFromFirestore,
+  deleteBatchDistributionsFromFirestore,
   loadFinanceData,
   saveFinanceSettingsToFirestore,
   loadFinanceQrMembers,
@@ -194,25 +197,102 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
   teams,
   donationInfo,
   language,
-  isReadOnly = false,
+  isReadOnly = true,
   onBack,
 }) => {
   // Independent Finance QR Members list (Strictly separated from About Us teams)
-  const [qrMembers, setQrMembers] = useState<FinanceQrMember[]>([]);
+  const [qrMembers, setQrMembers] = useState<FinanceQrMember[]>(() => {
+    try {
+      const defaults = (initialDefaultFinanceQrMembers as any[]) || [];
+      const defMap = new Map<string, any>(defaults.map((d) => [d.name?.trim().toLowerCase(), d]));
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem('hb_cached_qr_members');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // Restore any missing base64 QR codes or bank details from defaults
+            const merged = parsed.map((p: any) => {
+              const def = defMap.get(p.name?.trim().toLowerCase());
+              if (def) {
+                const hasValidUserQr = Boolean(p.financeQrUrl && p.financeQrUrl.startsWith('data:image'));
+                const hasValidDefQr = Boolean(def.financeQrUrl && def.financeQrUrl.startsWith('data:image'));
+                const finalQr = hasValidUserQr ? p.financeQrUrl : (hasValidDefQr ? def.financeQrUrl : (p.financeQrUrl || def.financeQrUrl || ''));
+                return {
+                  ...def,
+                  ...p,
+                  financeQrUrl: finalQr,
+                  imageUrl: (p.imageUrl && p.imageUrl.trim() !== '') ? p.imageUrl : (def.imageUrl || ''),
+                  bankName: (p.bankName && p.bankName.trim() !== '') ? p.bankName : (def.bankName || 'BCEL One'),
+                  bankAccountName: (p.bankAccountName && p.bankAccountName.trim() !== '') ? p.bankAccountName : (def.bankAccountName || p.name),
+                  bankAccountNumber: (p.bankAccountNumber && p.bankAccountNumber.trim() !== '') ? p.bankAccountNumber : (def.bankAccountNumber || ''),
+                };
+              }
+              return p;
+            });
+            // Also append any default members that were missing from cached list
+            defaults.forEach((def) => {
+              const exists = merged.some((m: any) => m.name?.trim().toLowerCase() === def.name?.trim().toLowerCase());
+              if (!exists) merged.push({ ...def });
+            });
+            return merged;
+          }
+        }
+      }
+      return (defaults as unknown as FinanceQrMember[]) || [];
+    } catch {}
+    return (initialDefaultFinanceQrMembers as unknown as FinanceQrMember[]) || [];
+  });
 
-  const [donations, setDonations] = useState<DonationTransaction[]>([]);
-  const [distributions, setDistributions] = useState<TeamDistribution[]>([]);
+  const [donations, setDonations] = useState<DonationTransaction[]>(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const cached = localStorage.getItem('hb_cached_donations');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch {}
+    return initialDefaultFinanceData.donations;
+  });
+
+  const [distributions, setDistributions] = useState<TeamDistribution[]>(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const cached = localStorage.getItem('hb_cached_distributions');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch {}
+    return initialDefaultFinanceData.distributions;
+  });
+
   const [currency, setCurrency] = useState<'₭' | '$' | '฿'>('₭');
   const [selectedPeriod, setSelectedPeriod] = useState<string>(() => {
     const d = new Date();
     const m = d.toLocaleString('en-US', { month: 'long' });
     return `${m} ${d.getFullYear()}`;
   });
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Configurable Emergency Reserve % (Default 20%, but admin can customize in Finance management)
-  const [emergencyPercent, setEmergencyPercent] = useState<number>(20);
-  const [tempPercentInput, setTempPercentInput] = useState<string>('20');
+  const [emergencyPercent, setEmergencyPercent] = useState<number>(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const cached = localStorage.getItem('hb_cached_finance_settings');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed.emergencyReservePercent === 'number') {
+            return parsed.emergencyReservePercent;
+          }
+        }
+      }
+    } catch {}
+    return initialDefaultFinanceData.financeSettings.emergencyReservePercent;
+  });
+  const [tempPercentInput, setTempPercentInput] = useState<string>(() => String(emergencyPercent));
   const [isSavingPercent, setIsSavingPercent] = useState<boolean>(false);
   const [percentSaveSuccess, setPercentSaveSuccess] = useState<boolean>(false);
   const [isPercentConfigOpen, setIsPercentConfigOpen] = useState<boolean>(false);
@@ -227,6 +307,18 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
   const [isDeletingMember, setIsDeletingMember] = useState<boolean>(false);
   const [isSavingMemberQr, setIsSavingMemberQr] = useState<boolean>(false);
   const [qrSaveMsg, setQrSaveMsg] = useState<string>('');
+
+  // General In-App Delete Confirmation State (Replaces window.confirm which is blocked in iframes)
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'inflow' | 'team_dist' | 'emergency_dist' | 'batch' | 'batch_cut_item';
+    id: string;
+    title: string;
+    subtitle?: string;
+    amount?: number;
+    batchCount?: number;
+    itemIds?: string[];
+  } | null>(null);
+  const [isDeletingTarget, setIsDeletingTarget] = useState<boolean>(false);
 
   // Inflow Filter & Active Selection State
   const [selectedInflowId, setSelectedInflowId] = useState<string | 'all'>('all');
@@ -356,9 +448,33 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
       
       // Intelligent merge to ensure existing QR codes, photos, and bank accounts are NEVER lost:
       const qrMap = new Map<string, FinanceQrMember>();
+      // Base defaults containing all 9 members with full base64 QR codes
+      ((initialDefaultFinanceQrMembers as any[]) || []).forEach((def: any) => {
+        qrMap.set(String(def.id), { ...def } as FinanceQrMember);
+      });
+
+      // Overlay server or local cached data
       (qrData || []).forEach((q: any) => {
         if (q && q.id) {
-          qrMap.set(String(q.id), q as FinanceQrMember);
+          const matched = qrMap.get(String(q.id)) || Array.from(qrMap.values()).find(
+            (x) => x.name?.trim().toLowerCase() === q.name?.trim().toLowerCase()
+          );
+          if (matched) {
+            const hasValidMatchedQr = Boolean(matched.financeQrUrl && matched.financeQrUrl.startsWith('data:image'));
+            const hasValidNewQr = Boolean(q.financeQrUrl && q.financeQrUrl.startsWith('data:image'));
+            const finalQr = hasValidNewQr ? q.financeQrUrl : (hasValidMatchedQr ? matched.financeQrUrl : (q.financeQrUrl || matched.financeQrUrl || ''));
+            qrMap.set(matched.id, {
+              ...matched,
+              ...q,
+              financeQrUrl: finalQr,
+              imageUrl: (q.imageUrl && q.imageUrl.trim() !== '') ? q.imageUrl : (matched.imageUrl || ''),
+              bankName: (q.bankName && q.bankName.trim() !== '') ? q.bankName : (matched.bankName || 'BCEL One'),
+              bankAccountName: (q.bankAccountName && q.bankAccountName.trim() !== '') ? q.bankAccountName : (matched.bankAccountName || q.name),
+              bankAccountNumber: (q.bankAccountNumber && q.bankAccountNumber.trim() !== '') ? q.bankAccountNumber : (matched.bankAccountNumber || ''),
+            });
+          } else {
+            qrMap.set(String(q.id), q as FinanceQrMember);
+          }
         }
       });
 
@@ -373,11 +489,14 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
 
           if (matched) {
             // Keep whatever has the valid QR code and bank info
+            const hasValidMatchedQr = Boolean(matched.financeQrUrl && matched.financeQrUrl.startsWith('data:image'));
+            const hasValidTeamQr = Boolean(t.financeQrUrl && t.financeQrUrl.startsWith('data:image'));
+            const finalQr = hasValidMatchedQr ? matched.financeQrUrl : (hasValidTeamQr ? t.financeQrUrl : (matched.financeQrUrl || t.financeQrUrl || ''));
             const merged: FinanceQrMember = {
               ...matched,
               name: matched.name || t.name,
               imageUrl: (matched.imageUrl && matched.imageUrl.trim()) || t.imageUrl || '',
-              financeQrUrl: (matched.financeQrUrl && matched.financeQrUrl.trim()) || t.financeQrUrl || '',
+              financeQrUrl: finalQr,
               bankName: (matched.bankName && matched.bankName.trim()) || t.bankName || 'BCEL One',
               bankAccountNumber: (matched.bankAccountNumber && matched.bankAccountNumber.trim()) || t.bankAccountNumber || '',
               bankAccountName: (matched.bankAccountName && matched.bankAccountName.trim()) || t.bankAccountName || t.name,
@@ -1050,13 +1169,13 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
     return list;
   }, [groupedTeamBatches, language]);
 
-  // Displayed Batches based on filter (always show all in readOnly Finance Overview)
+  // Displayed Batches based on filter
   const displayedTeamBatches = useMemo(() => {
-    if (isReadOnly || selectedTeamBatchFilter === 'all') {
+    if (selectedTeamBatchFilter === 'all') {
       return groupedTeamBatches;
     }
     return groupedTeamBatches.filter((b) => b.batchName.toLowerCase() === selectedTeamBatchFilter.toLowerCase());
-  }, [groupedTeamBatches, selectedTeamBatchFilter, isReadOnly]);
+  }, [groupedTeamBatches, selectedTeamBatchFilter]);
 
   // Check if there are multiple batches on the same date (e.g. #1, #2... on 05/09/2026)
   const hasMultipleSingleBatchesOnSameDay = useMemo(() => {
@@ -1262,31 +1381,13 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
   };
 
   // Cut / Remove single recipient item from current batch inside settings modal
-  const handleCutItemFromBatchInModal = async (itemId: string, recipientName: string) => {
-    if (
-      !confirm(
-        language === 'lo'
-          ? `ທ່ານແນ່ໃຈບໍ່ວ່າຕ້ອງການຕັດ ${recipientName} ອອກຈາກຊຸດນີ້?`
-          : `Remove ${recipientName} from this batch?`
-      )
-    ) {
-      return;
-    }
-    try {
-      await deleteTeamDistributionFromFirestore(itemId);
-      setDistributions((prev) => prev.filter((d) => d.id !== itemId));
-      if (editingBatchTarget) {
-        const remaining = (editingBatchTarget.items || []).filter((d: any) => d.id !== itemId);
-        const newTotal = remaining.reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
-        setEditingBatchTarget({
-          ...editingBatchTarget,
-          items: remaining,
-          totalAmount: newTotal,
-        });
-      }
-    } catch (err: any) {
-      alert(err?.message || 'Failed to remove recipient');
-    }
+  const handleCutItemFromBatchInModal = (itemId: string, recipientName: string, amount?: number) => {
+    setDeleteTarget({
+      type: 'batch_cut_item',
+      id: itemId,
+      title: recipientName,
+      amount,
+    });
   };
 
   // Update / Adjust recipient transfer amount inside settings modal
@@ -1666,15 +1767,71 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
     }
   };
 
-  const handleDeleteDonation = async (id: string) => {
-    if (confirm(language === 'lo' ? 'ທ່ານແນ່ໃຈບໍ່ວ່າຕ້ອງການລຶບລາຍການນີ້?' : 'Are you sure you want to delete this donation record?')) {
-      await deleteDonationTransactionFromFirestore(id);
-      if (selectedInflowId === id) {
-        setSelectedInflowId('all');
-        setSelectedInflowDetail(null);
+  // Dedicated In-App Confirmation Execution for Deleting Financial Records (Replaces blocked window.confirm)
+  const confirmDeleteTarget = async () => {
+    if (!deleteTarget) return;
+    setIsDeletingTarget(true);
+    const target = deleteTarget;
+    try {
+      if (target.type === 'inflow') {
+        setDonations((prev) => prev.filter((d) => d.id !== target.id));
+        if (selectedInflowId === target.id) {
+          setSelectedInflowId('all');
+          setSelectedInflowDetail(null);
+        }
+        await deleteDonationTransactionFromFirestore(target.id);
+      } else if (target.type === 'team_dist' || target.type === 'emergency_dist') {
+        setDistributions((prev) => prev.filter((d) => d.id !== target.id));
+        if (selectedDistDetail?.id === target.id) {
+          setSelectedDistDetail(null);
+        }
+        await deleteTeamDistributionFromFirestore(target.id);
+      } else if (target.type === 'batch') {
+        const idSet = new Set(target.itemIds || []);
+        const itemsToDelete = distributions.filter(
+          (d) =>
+            idSet.has(d.id) ||
+            (d.batchId && d.batchId === target.id) ||
+            (d.batchName && d.batchName === target.title) ||
+            (d.batchName && target.id && d.batchName === target.id) ||
+            `${d.transferDate || 'nodate'}_${d.batchName || 'default'}` === target.id
+        );
+        const toDeleteIds = itemsToDelete.length > 0 ? itemsToDelete.map((x) => x.id) : (target.itemIds || []);
+        const toDeleteSet = new Set(toDeleteIds);
+
+        setDistributions((prev) => prev.filter((d) => !toDeleteSet.has(d.id)));
+        await deleteBatchDistributionsFromFirestore(target.id, toDeleteIds, target.title);
+      } else if (target.type === 'batch_cut_item') {
+        setDistributions((prev) => prev.filter((d) => d.id !== target.id));
+        if (editingBatchTarget) {
+          const remaining = (editingBatchTarget.items || []).filter((d: any) => d.id !== target.id);
+          const newTotal = remaining.reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
+          setEditingBatchTarget({
+            ...editingBatchTarget,
+            items: remaining,
+            totalAmount: newTotal,
+          });
+        }
+        await deleteTeamDistributionFromFirestore(target.id);
       }
+      setDeleteTarget(null);
       await fetchFinance();
+    } catch (err: any) {
+      console.error('Failed to delete item:', err);
+      alert(err?.message || (language === 'lo' ? 'ເກີດຂໍ້ຜິດພາດໃນການລຶບ' : 'Delete failed'));
+    } finally {
+      setIsDeletingTarget(false);
     }
+  };
+
+  const handleDeleteDonation = (id: string, description?: string, amount?: number, date?: string) => {
+    setDeleteTarget({
+      type: 'inflow',
+      id,
+      title: description || (language === 'lo' ? 'ເງິນສະໜັບສະໜູນ' : 'Inflow Donation'),
+      subtitle: date,
+      amount,
+    });
   };
 
   // Save Single Team Distribution Record
@@ -1769,30 +1926,25 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
     setEmNotes('');
   };
 
-  const handleDeleteDist = async (id: string) => {
-    if (confirm(language === 'lo' ? 'ທ່ານແນ່ໃຈບໍ່ວ່າຕ້ອງການລຶບລາຍການໂອນນີ້?' : 'Are you sure you want to delete this distribution record?')) {
-      await deleteTeamDistributionFromFirestore(id);
-      await fetchFinance();
-    }
+  const handleDeleteDist = (id: string, name?: string, notes?: string, amount?: number, isEmergency?: boolean) => {
+    setDeleteTarget({
+      type: isEmergency ? 'emergency_dist' : 'team_dist',
+      id,
+      title: name || (language === 'lo' ? 'ລາຍການໂອນ' : 'Transfer Record'),
+      subtitle: notes,
+      amount,
+    });
   };
 
   // Delete an Entire Batch / Round (Works for both Team & Emergency batches)
-  const handleDeleteBatch = async (batchId: string, batchName: string, count: number) => {
-    if (
-      confirm(
-        language === 'lo'
-          ? `ແນ່ໃຈບໍ່ວ່າຕ້ອງການລຶບງວດ "${batchName}" (ທັງໝົດ ${count} ລາຍການ)?`
-          : `Are you sure you want to delete batch "${batchName}" (${count} records)?`
-      )
-    ) {
-      const itemsToDelete = distributions.filter(
-        (d) => d.batchId === batchId || `${d.transferDate || 'nodate'}_${d.batchName || 'default'}` === batchId
-      );
-      for (const item of itemsToDelete) {
-        await deleteTeamDistributionFromFirestore(item.id);
-      }
-      await fetchFinance();
-    }
+  const handleDeleteBatch = (batchId: string, batchName: string, count: number, itemIds?: string[]) => {
+    setDeleteTarget({
+      type: 'batch',
+      id: batchId,
+      title: batchName,
+      batchCount: count,
+      itemIds: itemIds || [],
+    });
   };
 
   // Auto Split 80% into a dedicated Batch / Round
@@ -1884,7 +2036,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Top Banner & Currency Control */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 bg-slate-900 text-white p-3.5 sm:p-6 rounded-3xl border border-slate-800 shadow-xl">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 bg-slate-900 text-white p-3.5 sm:p-6 rounded-none border border-slate-800 shadow-xl">
         <div className="flex items-start sm:items-center justify-between w-full sm:w-auto gap-2 sm:gap-3">
           <div className="flex items-start sm:items-center gap-2 sm:gap-3 min-w-0 flex-1">
             {onBack && (
@@ -1907,12 +2059,23 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
             </div>
           </div>
 
-          {/* Mobile Download button: right aligned on the same row as the title */}
-          <div className="sm:hidden shrink-0 self-start -mt-0.5">
+          {/* Mobile buttons: right aligned on the same row as the title */}
+          <div className="sm:hidden shrink-0 self-start -mt-0.5 flex items-center gap-1.5">
+            {!isReadOnly && (
+              <button
+                type="button"
+                onClick={() => setIsTeamQrManagerOpen(true)}
+                className="p-1.5 xs:p-2 bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white rounded-none text-xs font-bold transition flex items-center gap-1 border border-purple-500 shadow cursor-pointer active:scale-95"
+                title={language === 'lo' ? '💳 ຈັດການບັນຊີຄິວອາ (QR Accounts)' : 'Manage QR Accounts'}
+              >
+                <QrCode className="w-4 h-4 text-purple-200" />
+                <span className="text-[10px] font-mono bg-purple-900/90 px-1 rounded">{qrMembers.length}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleExportCSV}
-              className="p-1.5 xs:p-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition flex items-center justify-center border border-slate-700 shadow cursor-pointer active:scale-95"
+              className="p-1.5 xs:p-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-none text-xs font-bold transition flex items-center justify-center border border-slate-700 shadow cursor-pointer active:scale-95"
               title={language === 'lo' ? 'ດາວໂຫຼດ CSV' : 'Export CSV'}
             >
               <Download className="w-4 h-4 text-emerald-400" />
@@ -1921,45 +2084,26 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
         </div>
 
         <div className="flex items-center gap-2 shrink-0 self-start sm:self-center flex-wrap">
+          {/* Desktop QR Accounts Manager button */}
           {!isReadOnly && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingMemberQr(null);
-                  setIsTeamQrManagerOpen(true);
-                }}
-                className="px-3.5 py-2 bg-purple-900/60 hover:bg-purple-800 text-purple-200 hover:text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 border border-purple-500/50 shadow cursor-pointer"
-                title={language === 'lo' ? 'ຈັດການ QR ໂອນເງິນປະຈຳຕົວລູກທີມ ພ້ອມຊື່ກຳກັບ' : 'Manage Team QR Codes & Labels'}
-              >
-                <QrCode className="w-3.5 h-3.5 text-purple-300" />
-                <span>
-                  {language === 'lo' ? '💳 ຕັ້ງຄ່າ QR ໂອນເງິນລູກທີມ' : 'Team QR Manager'}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsPercentConfigOpen(!isPercentConfigOpen)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border shadow cursor-pointer ${
-                  isPercentConfigOpen
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 font-black'
-                    : 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-slate-700'
-                }`}
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                <span>
-                  {language === 'lo' ? `ຕັ້ງຄ່າ % ຕັດເງິນ (${emergencyPercent}%)` : `Configure % (${emergencyPercent}%)`}
-                </span>
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => setIsTeamQrManagerOpen(true)}
+              className="hidden sm:flex p-2 sm:px-3 sm:py-2.5 bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white rounded-none text-xs font-bold transition items-center gap-1.5 border border-purple-500 shadow cursor-pointer"
+              title={language === 'lo' ? '💳 ຈັດການບັນຊີຄິວອາ (QR Accounts)' : 'Manage QR Accounts'}
+            >
+              <QrCode className="w-4 h-4 text-purple-200" />
+              <span>{language === 'lo' ? '💳 ຈັດການບັນຊີຄິວອາ' : 'Manage QR Accounts'}</span>
+              <span className="text-[10px] font-mono bg-purple-900/90 px-1.5 py-0.5 rounded-full border border-purple-400/50">
+                {qrMembers.length}
+              </span>
+            </button>
           )}
-
           {/* Desktop Download button */}
           <button
             type="button"
             onClick={handleExportCSV}
-            className="hidden sm:flex p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition items-center justify-center border border-slate-700 shadow cursor-pointer"
+            className="hidden sm:flex p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-none text-xs font-bold transition items-center justify-center border border-slate-700 shadow cursor-pointer"
             title={language === 'lo' ? 'ດາວໂຫຼດ CSV' : 'Export CSV'}
           >
             <Download className="w-4 h-4 text-emerald-400" />
@@ -1967,412 +2111,12 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
         </div>
       </div>
 
-      {/* DEDICATED PERCENTAGE DEDUCTION CONFIGURATION PANEL (When opened in Admin mode) */}
-      {!isReadOnly && isPercentConfigOpen && (
-        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-5 sm:p-6 rounded-3xl border-2 border-amber-500/50 shadow-xl space-y-4 animate-scale-in">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/80 pb-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-                <Percent className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-base sm:text-lg font-black text-white">
-                  {language === 'lo'
-                    ? 'ຕັ້ງຄ່າອັດຕາສ່ວນຕັດເງິນສຳຮອງສຸກເສີນ (Deduction Percentage Setting)'
-                    : 'Emergency Reserve Deduction Percentage'}
-                </h4>
-                <p className="text-xs sm:text-sm text-slate-300">
-                  {language === 'lo'
-                    ? `ເມື່ອມີເງິນໂອນເຂົ້າ, ລະບົບຈະຫັກ ${emergencyPercent}% ເຂົ້າກອງທຶນສຸກເສີນ ແລະ ເຫຼືອ ${teamPercent}% ໄວ້ແບ່ງປັນໃຫ້ລູກທີມ`
-                    : `Inflow deduction: ${emergencyPercent}% for emergency reserve, ${teamPercent}% allocated to team pool`}
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setIsPercentConfigOpen(false)}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
-            {/* Quick preset buttons */}
-            <div className="sm:col-span-6 space-y-2">
-              <span className="text-xs font-black uppercase tracking-wider text-slate-300 block">
-                {language === 'lo' ? 'ເລືອກອັດຕາສ່ວນດ່ວນ (Quick Presets):' : 'Quick Presets:'}
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {[10, 15, 20, 25, 30, 40, 50].map((pct) => (
-                  <button
-                    key={pct}
-                    type="button"
-                    onClick={() => {
-                      setTempPercentInput(String(pct));
-                      handleSavePercentage(pct);
-                    }}
-                    className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-black transition border ${
-                      emergencyPercent === pct
-                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
-                        : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700'
-                    }`}
-                  >
-                    {pct}%
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Custom input and save button */}
-            <div className="sm:col-span-6 flex flex-wrap items-end gap-3">
-              <div className="flex-1 min-w-[140px]">
-                <label className="block text-xs font-black uppercase tracking-wider text-slate-300 mb-1">
-                  {language === 'lo' ? 'ປ້ອນ % ເອງ (Custom %):' : 'Custom %:'}
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={tempPercentInput}
-                    onChange={(e) => setTempPercentInput(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-base font-black text-amber-400 outline-none focus:border-amber-400"
-                    placeholder="20"
-                  />
-                  <span className="absolute right-3.5 top-2.5 text-sm text-slate-400 font-bold">%</span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                disabled={isSavingPercent}
-                onClick={() => handleSavePercentage()}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white rounded-xl text-xs sm:text-sm font-black transition flex items-center gap-2 shadow-md shrink-0"
-              >
-                {isSavingPercent ? (
-                  <span>...</span>
-                ) : percentSaveSuccess ? (
-                  <>
-                    <Check className="w-4 h-4 text-white" />
-                    <span>{language === 'lo' ? 'ບັນທຶກແລ້ວ!' : 'Saved!'}</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>{language === 'lo' ? '💾 ບັນທຶກ' : 'Save %'}</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 📱 DEDICATED SHOWCASE: ALL TEAM MEMBERS BANK ACCOUNTS & QR CODES (FOR MANAGERS/ADMINS ONLY - Hidden for Supporters) */}
-      {!isReadOnly && (
-        <div className="bg-white dark:bg-slate-900 p-5 sm:p-7 rounded-3xl border border-slate-200 dark:border-slate-700/80 shadow-md space-y-5 animate-fade-in">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-700/80 pb-4">
-            <div className="flex items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-purple-600/10 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center font-black border border-purple-500/20 shadow-xs shrink-0">
-                <QrCode className="w-7 h-7" />
-              </div>
-              <div>
-                <h3 className="text-base sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5 flex-wrap">
-                  <span>{language === 'lo' ? '📱 ບັນຊີ QR ໂອນເງິນປະຈຳຕົວລູກທີມ (ສະເພາະຫ້ອງຜູ້ຈັດການ)' : 'Team Member QR Codes (Manager Mode)'}</span>
-                  <span className="text-xs sm:text-sm font-black px-3 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
-                    {qrMembers.length} {language === 'lo' ? 'ທ່ານ' : 'Members'}
-                  </span>
-                </h3>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingMemberQr({
-                    id: `fq_${Date.now()}`,
-                    name: '',
-                    imageUrl: '',
-                    financeQrUrl: '',
-                  });
-                  setIsTeamQrManagerOpen(true);
-                }}
-                className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 active:scale-98 text-white rounded-xl text-xs sm:text-sm font-black shadow flex items-center gap-2 transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>{language === 'lo' ? '+ ເພີ່ມບັນຊີ QR' : '+ Add QR Account'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Cleaned QR Cards Grid - Showing ONLY Photo, Name, QR Code, and bottom buttons (4 cards per row) */}
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3 sm:gap-3.5">
-            {qrMembers.length === 0 ? (
-              <div className="col-span-full p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-400">
-                <QrCode className="w-10 h-10 mx-auto opacity-30 mb-2" />
-                <p className="text-xs sm:text-sm font-bold">
-                  {language === 'lo' ? 'ຍັງບໍ່ມີຂໍ້ມູນບັນຊີ QR' : 'No QR accounts registered yet'}
-                </p>
-              </div>
-            ) : (
-              qrMembers.map((m, idx) => {
-                const memberKey = m.id || idx;
-
-                return (
-                    <div
-                      key={memberKey}
-                      className="bg-slate-50/90 dark:bg-slate-900/90 p-2.5 sm:p-3 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 shadow-2xs hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700 transition flex flex-col justify-between space-y-2.5 group"
-                    >
-                      {/* 1. Profile Photo & Person Name ONLY (Compact) */}
-                      <div className="flex items-center gap-2 min-w-0">
-                        {m.imageUrl ? (
-                          <img
-                            src={m.imageUrl}
-                            alt={m.name}
-                            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border-[1.5px] border-purple-400 dark:border-purple-600 shrink-0 shadow-2xs"
-                          />
-                        ) : (
-                          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-purple-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                            {m.name ? m.name.charAt(0) : '👤'}
-                          </div>
-                        )}
-
-                        <div className="min-w-0 flex-1">
-                          <h4 className="font-extrabold text-xs sm:text-[13px] text-slate-900 dark:text-white truncate">
-                            {m.name || (language === 'lo' ? 'ບໍ່ມີຊື່' : 'Unnamed')}
-                          </h4>
-                        </div>
-                      </div>
-
-                    {/* 2. QR Code Image Box - Fills inner square box */}
-                    <div className="w-full aspect-square flex items-center justify-center bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-1 overflow-hidden relative shadow-2xs">
-                      {m.financeQrUrl ? (
-                        <div
-                          onClick={() => setViewingMemberQr(m)}
-                          className="relative cursor-pointer group/qr w-full h-full flex items-center justify-center overflow-hidden rounded-lg"
-                          title={language === 'lo' ? 'ກົດເພື່ອເບິ່ງ QR ຂະໜາດໃຫຍ່' : 'Click to preview QR'}
-                        >
-                          <img
-                            src={m.financeQrUrl}
-                            alt={`QR ${m.name}`}
-                            className="w-full h-full object-contain rounded-md block transition-transform duration-200 group-hover/qr:scale-105"
-                          />
-                          <div className="absolute inset-0 bg-purple-900/70 opacity-0 group-hover/qr:opacity-100 transition flex items-center justify-center text-white text-[11px] font-black rounded-md">
-                            🔍 {language === 'lo' ? 'ຂະໜາຍ' : 'Zoom'}
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingMemberQr({
-                              id: m.id,
-                              name: m.name || '',
-                              imageUrl: m.imageUrl || '',
-                              financeQrUrl: '',
-                              bankName: m.bankName || 'BCEL One',
-                              bankAccountNumber: m.bankAccountNumber || '',
-                              bankAccountName: m.bankAccountName || m.name || '',
-                            });
-                            setIsTeamQrManagerOpen(true);
-                          }}
-                          className="w-full h-full border-2 border-dashed border-purple-300 dark:border-purple-800 hover:border-purple-500 rounded-lg bg-purple-50/50 dark:bg-purple-950/30 flex flex-col items-center justify-center text-purple-600 dark:text-purple-400 text-xs font-bold p-1.5 text-center transition cursor-pointer"
-                        >
-                          <QrCode className="w-6 h-6 mb-1 opacity-60" />
-                          <span className="text-[11px] leading-tight">{language === 'lo' ? '+ ອັບໂຫຼດຮູບ QR' : '+ Add QR'}</span>
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Bank Account Number & Bank Badge Display */}
-                    <div className="bg-white dark:bg-slate-950 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-0.5 min-w-0">
-                      <div className="flex items-center justify-between text-[10px] leading-tight">
-                        <span className="font-bold text-purple-700 dark:text-purple-300 truncate flex items-center gap-1">
-                          <Building className="w-2.5 h-2.5 text-purple-600 shrink-0" />
-                          <span className="truncate">{m.bankName || 'BCEL One'}</span>
-                        </span>
-                        {m.bankAccountName && (
-                          <span className="text-slate-400 text-[9px] truncate max-w-[65px]" title={m.bankAccountName}>
-                            {m.bankAccountName}
-                          </span>
-                        )}
-                      </div>
-
-                      {m.bankAccountNumber ? (
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-mono font-bold text-[11px] text-slate-800 dark:text-slate-200 select-all truncate tracking-tight">
-                            {m.bankAccountNumber}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyQrAccount(m.bankAccountNumber!, m.id);
-                            }}
-                            className="p-0.5 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50 text-slate-400 hover:text-purple-600 dark:hover:text-purple-300 transition cursor-pointer shrink-0"
-                            title={language === 'lo' ? 'ກັອບປີ້ເລກບັນຊີ' : 'Copy account number'}
-                          >
-                            {copiedMemberId === m.id ? (
-                              <Check className="w-3 h-3 text-emerald-500" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingMemberQr({
-                              id: m.id,
-                              name: m.name || '',
-                              imageUrl: m.imageUrl || '',
-                              financeQrUrl: m.financeQrUrl || '',
-                              bankName: m.bankName || 'BCEL One',
-                              bankAccountNumber: '',
-                              bankAccountName: m.bankAccountName || m.name || '',
-                            });
-                            setIsTeamQrManagerOpen(true);
-                          }}
-                          className="w-full text-center py-0.5 text-[9px] text-purple-600 dark:text-purple-400 hover:underline font-bold truncate block"
-                        >
-                          {language === 'lo' ? '+ ປ້ອນເລກບັນຊີ' : '+ Add Account #'}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* 3. Actions Bottom: Tiny micro icon-only buttons (Edit, Transfer, Delete) */}
-                    <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingMemberQr({
-                            id: m.id,
-                            name: m.name || '',
-                            imageUrl: m.imageUrl || '',
-                            financeQrUrl: m.financeQrUrl || '',
-                            bankName: m.bankName || 'BCEL One',
-                            bankAccountNumber: m.bankAccountNumber || '',
-                            bankAccountName: m.bankAccountName || m.name || '',
-                          });
-                          setIsTeamQrManagerOpen(true);
-                        }}
-                        className="w-5 h-5 sm:w-5.5 sm:h-5.5 rounded-md bg-slate-100 hover:bg-purple-100 text-slate-600 hover:text-purple-600 dark:bg-slate-800 dark:hover:bg-purple-900/50 dark:text-slate-300 dark:hover:text-purple-300 transition flex items-center justify-center cursor-pointer"
-                        title={language === 'lo' ? 'ແກ້ໄຂ QR' : language === 'th' ? 'แก้ไข QR' : 'Edit QR'}
-                      >
-                        <Edit2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDistRecipient(m.name);
-                          setDistAmount('');
-                          setDistEvidence('');
-                          setDistNotes('');
-                          setDistBatchName(`ງວດທີ 1 (${m.name})`);
-                          setEditingDist(null);
-                          setIsAddDistOpen(true);
-                        }}
-                        className="w-5 h-5 sm:w-5.5 sm:h-5.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center justify-center cursor-pointer shadow-2xs"
-                        title={language === 'lo' ? 'ໂອນເງິນ' : language === 'th' ? 'โอนเงิน' : 'Transfer'}
-                      >
-                        <Send className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setMemberToDelete(m)}
-                        className="w-5 h-5 sm:w-5.5 sm:h-5.5 rounded-md bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 dark:bg-red-950/40 dark:hover:bg-red-900/60 dark:text-red-400 transition flex items-center justify-center cursor-pointer"
-                        title={language === 'lo' ? 'ລຶບ QR' : language === 'th' ? 'ลบ QR' : 'Delete QR'}
-                      >
-                        <Trash2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
-
       {/* BATCH SELECTOR & KPI CARDS: SHOWS NEW BATCH AMOUNT AS MAIN NUMBER & ALL BATCHES TOTAL BELOW */}
       <div className="space-y-3">
-        {/* Hidden on mobile phones as requested */}
-        <div className="hidden md:flex flex-wrap items-center justify-between gap-2.5 px-1 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 font-black text-slate-800 dark:text-slate-200">
-              <Sparkles className="w-4 h-4 text-amber-500" />
-              <span>{language === 'lo' ? 'ການສະແດງຍອດເງິນ:' : language === 'th' ? 'การแสดงยอดเงิน:' : 'Treasury View:'}</span>
-            </span>
-            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
-              {activeKpiBatch
-                ? (language === 'lo'
-                    ? `ກຳລັງສະແດງຕົວເລກເງິນຊຸດໃໝ່ (${activeBatchLabel})`
-                    : language === 'th'
-                    ? `กำลังแสดงตัวเลขเงินงวดใหม่ (${activeBatchLabel})`
-                    : `Showing New Batch Figures (${activeBatchLabel})`)
-                : (language === 'lo' ? 'ກຳລັງສະແດງ: ລວມທຸກໆຊຸດ' : language === 'th' ? 'กำลังแสดง: รวมทุกชุด' : 'Showing: All Batches Combined')}
-            </span>
-          </div>
-
-          {/* Quick Batch Filter Switcher */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setSelectedKpiBatch('latest')}
-              className={`px-3 py-1 rounded-full text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
-                selectedKpiBatch === 'latest'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              <Sparkles className="w-3 h-3 text-amber-300" />
-              <span>{language === 'lo' ? '✨ ຊຸດໃໝ່ຫຼ້າສຸດ' : '✨ Latest Batch'}</span>
-              {latestDonationBatch && (
-                <span className="text-[10px] opacity-90 font-mono">({latestDonationBatch.labelLao} • {latestDonationBatch.deductionPercent}%)</span>
-              )}
-            </button>
-
-            {groupedDonationBatches.length > 1 &&
-              groupedDonationBatches.slice(1).map((b) => (
-                <button
-                  key={b.batchKey}
-                  type="button"
-                  onClick={() => setSelectedKpiBatch(b.batchKey)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                    selectedKpiBatch === b.batchKey
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  <span>{language === 'lo' ? b.labelLao : b.labelEn}</span>
-                  <span className="text-[9px] opacity-80 font-mono">({b.deductionPercent}%)</span>
-                </button>
-              ))}
-
-            <button
-              type="button"
-              onClick={() => setSelectedKpiBatch('all')}
-              className={`px-2.5 py-1 rounded-full text-xs font-bold transition cursor-pointer ${
-                selectedKpiBatch === 'all'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              {language === 'lo' ? 'ລວມທຸກໆຊຸດ' : 'All Batches'}
-            </button>
-          </div>
-        </div>
-
         {/* TOP 3 MAIN SPREADSHEET KPI CARDS (Side-by-side on mobile and desktop) */}
         <div className="grid grid-cols-3 gap-1.5 sm:gap-4 md:gap-5">
           {/* 1. Total Net Remaining Balance (ເງິນຕົວຈິງທີ່ຍັງເຫຼືອ) */}
-          <div className="text-white p-2 sm:p-4 md:p-5 rounded-xl sm:rounded-2xl shadow-lg border relative overflow-hidden flex flex-col justify-between min-h-[96px] sm:min-h-[140px] md:min-h-[170px] bg-[#243b67] border-blue-400/40">
+          <div className="text-white p-2 sm:p-4 md:p-5 rounded-none shadow-lg border relative overflow-hidden flex flex-col justify-between min-h-[96px] sm:min-h-[140px] md:min-h-[170px] bg-[#243b67] border-blue-400/40">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[8.5px] sm:text-xs md:text-sm font-black uppercase tracking-wider text-blue-200 leading-tight truncate">
                 TOTAL BALANCE
@@ -2388,20 +2132,30 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
               </div>
             </div>
 
-            {/* ດ້ານລຸ່ມ: ຈຳນວນຊຸດການໂອນ */}
-            <div className="pt-1 sm:pt-2 border-t border-blue-400/35 flex items-center justify-between text-[7.5px] sm:text-xs text-blue-100 font-bold gap-1">
-              <span className="flex items-center gap-1 truncate">
-                <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-blue-300 shrink-0" />
-                <span className="truncate">{language === 'lo' ? 'ຊຸດການໂອນ:' : 'Batches:'}</span>
-              </span>
-              <span className="text-[8px] sm:text-sm font-black text-white font-mono bg-blue-500/30 px-1 sm:px-2 py-0.5 rounded sm:rounded-lg border border-blue-400/40 shrink-0">
-                {groupedTeamBatches.length} <span className="hidden sm:inline">{language === 'lo' ? 'ຊຸດ' : 'Batches'}</span>
-              </span>
+            {/* ດ້ານລຸ່ມ: TOTAL ຂອງທຸກຊຸດເລີຍ ຕາມທີ່ຜູ້ໃຊ້ຮ້ອງຂໍ */}
+            <div className="pt-1 sm:pt-2 border-t border-blue-400/35 space-y-0.5 sm:space-y-1">
+              <div className="flex items-center justify-between text-[7.5px] sm:text-xs text-blue-100 font-bold gap-1">
+                <span className="flex items-center gap-1 truncate">
+                  <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-blue-300 shrink-0" />
+                  <span className="truncate">
+                    {language === 'lo' ? 'Total ທຸກຊຸດ:' : 'Total All Batches:'}
+                  </span>
+                </span>
+                <span className="text-[8px] sm:text-sm font-black text-white font-mono shrink-0">
+                  {totalBalanceAll.toLocaleString()} {currency}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[7.5px] sm:text-xs text-blue-200/90 font-medium">
+                <span>{language === 'lo' ? 'ຈຳນວນຊຸດ:' : 'Batches:'}</span>
+                <span className="font-bold text-white font-mono">
+                  {groupedDonationBatches.length} {language === 'lo' ? 'ຊຸດ' : 'batches'}
+                </span>
+              </div>
             </div>
           </div>
 
           {/* 2. Configured % Emergency Savings Reserve */}
-          <div className="text-white p-2 sm:p-4 md:p-5 rounded-xl sm:rounded-2xl shadow-lg border relative overflow-hidden flex flex-col justify-between min-h-[96px] sm:min-h-[140px] md:min-h-[170px] bg-[#1a4a38] border-emerald-500/40">
+          <div className="text-white p-2 sm:p-4 md:p-5 rounded-none shadow-lg border relative overflow-hidden flex flex-col justify-between min-h-[96px] sm:min-h-[140px] md:min-h-[170px] bg-[#1a4a38] border-emerald-500/40">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[8.5px] sm:text-xs md:text-sm font-black uppercase tracking-wider text-emerald-200 leading-tight truncate">
                 {activeKpiBatch ? activeBatchPercent : emergencyPercent}% <span className="hidden sm:inline">EMERGENCY</span> SAVINGS
@@ -2417,27 +2171,35 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
               </div>
             </div>
 
-            {/* 2. ດ້ານລຸ່ມຕົວເລກຈຶ່ງມີການລວມເງິນທຸກໆຊຸດ */}
+            {/* 2. ດ້ານລຸ່ມ: ບອກຍອດລວມ ໂອນເທົ່າໃດ ຍັງເທົ່າໃດ (ບໍ່ເອົາເລກຊຸດ) */}
             <div className="pt-1 sm:pt-2 border-t border-emerald-500/35 space-y-0.5 sm:space-y-1">
               <div className="flex items-center justify-between text-[7.5px] sm:text-xs text-emerald-100 font-bold gap-1">
                 <span className="flex items-center gap-1 truncate">
-                  <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-300 shrink-0" />
-                  <span className="truncate">{activeKpiBatch ? (language === 'lo' ? 'ສຳຮອງຊຸດນີ້:' : 'Batch Reserve:') : (language === 'lo' ? 'ສຳຮອງລວມ:' : 'Total Reserve:')}</span>
+                  <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-rose-400 shrink-0" />
+                  <span className="truncate">
+                    {language === 'lo' ? 'ໂອນລວມ:' : 'Total Paid:'}
+                  </span>
                 </span>
                 <span className="text-[8px] sm:text-sm font-black text-white font-mono shrink-0">
-                  {(activeKpiBatch ? kpiBatchEmergencyReserve : remainingEmergencySavings).toLocaleString()}
+                  {totalEmergencyTransferred.toLocaleString()} {currency}
                 </span>
               </div>
-              <div className="text-[7px] sm:text-[11px] text-emerald-200/80 font-medium flex items-center justify-between flex-wrap gap-0.5">
-                <span>{language === 'lo' ? 'ລວມ:' : 'Tot:'} {(activeKpiBatch ? kpiBatchEmergencyReserve : totalSavings20).toLocaleString()}</span>
-                <span className="hidden sm:inline">-</span>
-                <span>{language === 'lo' ? 'ໂອນ:' : 'Paid:'} {(activeKpiBatch ? kpiBatchEmergencyTransferred : totalEmergencyTransferred).toLocaleString()}</span>
+              <div className="flex items-center justify-between text-[7.5px] sm:text-xs text-emerald-200/90 font-medium gap-1">
+                <span className="flex items-center gap-1 truncate">
+                  <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-300 shrink-0" />
+                  <span className="truncate">
+                    {language === 'lo' ? 'ຍັງເຫຼືອ:' : 'Remaining:'}
+                  </span>
+                </span>
+                <span className="font-bold text-white font-mono shrink-0">
+                  {remainingEmergencySavings.toLocaleString()} {currency}
+                </span>
               </div>
             </div>
           </div>
 
           {/* 3. Configured % Team Support Distribution Pool */}
-          <div className="text-white p-2 sm:p-4 md:p-5 rounded-xl sm:rounded-2xl shadow-lg border relative overflow-hidden flex flex-col justify-between min-h-[96px] sm:min-h-[140px] md:min-h-[170px] bg-[#5c2424] border-red-400/40">
+          <div className="text-white p-2 sm:p-4 md:p-5 rounded-none shadow-lg border relative overflow-hidden flex flex-col justify-between min-h-[96px] sm:min-h-[140px] md:min-h-[170px] bg-[#5c2424] border-red-400/40">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[8.5px] sm:text-xs md:text-sm font-black uppercase tracking-wider text-red-200 leading-tight truncate">
                 {activeKpiBatch ? activeBatchTeamPercent : teamPercent}% TEAM POOL
@@ -2453,21 +2215,29 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
               </div>
             </div>
 
-            {/* 2. ດ້ານລຸ່ມຕົວເລກຈຶ່ງມີການລວມເງິນທຸກໆຊຸດ */}
+            {/* 3. ດ້ານລຸ່ມ: ບອກຍອດລວມ ໂອນເທົ່າໃດ ຍັງເທົ່າໃດ (ບໍ່ເອົາເລກຊຸດ) */}
             <div className="pt-1 sm:pt-2 border-t border-red-400/35 space-y-0.5 sm:space-y-1">
               <div className="flex items-center justify-between text-[7.5px] sm:text-xs text-red-100 font-bold gap-1">
                 <span className="flex items-center gap-1 truncate">
                   <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-amber-400 shrink-0" />
-                  <span className="truncate">{activeKpiBatch ? (language === 'lo' ? 'ກອງທຶນຊຸດນີ້:' : 'Batch Pool:') : (language === 'lo' ? 'ກອງທຶນທີມ:' : 'Team Pool:')}</span>
+                  <span className="truncate">
+                    {language === 'lo' ? 'ໂອນລວມ:' : 'Total Paid:'}
+                  </span>
                 </span>
                 <span className="text-[8px] sm:text-sm font-black text-white font-mono shrink-0">
-                  {(activeKpiBatch ? kpiBatchTeamPool : remaining80Actual).toLocaleString()}
+                  {totalTeamTransferred.toLocaleString()} {currency}
                 </span>
               </div>
-              <div className="text-[7px] sm:text-[11px] text-red-200/80 font-medium flex items-center justify-between flex-wrap gap-0.5">
-                <span>{language === 'lo' ? 'ລວມ:' : 'Tot:'} {(activeKpiBatch ? kpiBatchTeamPool : totalPool80).toLocaleString()}</span>
-                <span className="hidden sm:inline">-</span>
-                <span>{language === 'lo' ? 'ໂອນ:' : 'Paid:'} {(activeKpiBatch ? kpiBatchTeamTransferred : totalTeamTransferred).toLocaleString()}</span>
+              <div className="flex items-center justify-between text-[7.5px] sm:text-xs text-red-200/90 font-medium gap-1">
+                <span className="flex items-center gap-1 truncate">
+                  <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 shrink-0" />
+                  <span className="truncate">
+                    {language === 'lo' ? 'ຍັງເຫຼືອ:' : 'Remaining:'}
+                  </span>
+                </span>
+                <span className="font-bold text-white font-mono shrink-0">
+                  {remaining80Actual.toLocaleString()} {currency}
+                </span>
               </div>
             </div>
           </div>
@@ -2475,7 +2245,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
       </div>
 
       {/* COMPACT FILTER PANEL FOR SPREADSHEET (Single Row Layout) */}
-      <div className="bg-white dark:bg-slate-800 px-2.5 sm:px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xs flex items-center justify-between gap-2 text-xs">
+      <div className="bg-white dark:bg-slate-800 px-2.5 sm:px-3.5 py-2 rounded-none border border-slate-200 dark:border-slate-700 shadow-xs flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-1.5 shrink-0">
           <Filter className="w-3.5 h-3.5 text-[#cc0000] shrink-0" />
           <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-100 whitespace-nowrap">
@@ -2500,7 +2270,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                 setFilterYear(val === '' ? 'all' : val);
               }}
               placeholder={language === 'lo' ? 'ປີ 2026...' : 'Year 2026...'}
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-[11px] sm:text-xs text-slate-800 dark:text-white font-bold outline-none focus:border-amber-500"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-none px-2 py-1 text-[11px] sm:text-xs text-slate-800 dark:text-white font-bold outline-none focus:border-amber-500"
             />
             <datalist id="finance-years-list">
               <option value="all">{language === 'lo' ? 'ທຸກໆປີ (All Years)' : 'All Years'}</option>
@@ -2527,7 +2297,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
             <select
               value={filterMonth}
               onChange={(e) => setFilterMonth(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-[11px] sm:text-xs text-slate-800 dark:text-white font-bold outline-none focus:border-amber-500"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-none px-2 py-1 text-[11px] sm:text-xs text-slate-800 dark:text-white font-bold outline-none focus:border-amber-500"
             >
               <option value="all">{language === 'lo' ? 'ທຸກໆເດືອນ' : 'All Months'}</option>
               {monthsList.map((m) => (
@@ -2541,7 +2311,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
           {isFilterActive && (
             <button
               onClick={handleResetFilters}
-              className="px-1.5 sm:px-2 py-1 text-[10px] sm:text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 bg-slate-100 dark:bg-slate-700 rounded-lg transition shrink-0"
+              className="px-1.5 sm:px-2 py-1 text-[10px] sm:text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 bg-slate-100 dark:bg-slate-700 rounded-none transition shrink-0"
               title={language === 'lo' ? 'ລ້າງຕົວກັ່ນຕອງ' : 'Reset Filters'}
             >
               <RotateCcw className="w-3 h-3" />
@@ -2554,9 +2324,9 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
       {/* SPREADSHEET 3-COLUMN SECTION: Left (Inflow) | Middle (Emergency Outflow) | Right (Team Support) */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-3.5 sm:gap-5 items-start">
         {/* 1. LEFT SECTION: Supporter Donations Inflow */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-auto">
+        <div className="bg-white dark:bg-slate-800 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-auto">
           {/* Table Header Bar */}
-          <div className="bg-[#1e293b] text-white px-3 py-2.5 flex items-center justify-between">
+          <div className="bg-[#1e293b] text-white px-3 py-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
               <h3 className="text-[11px] font-black uppercase tracking-wider">
@@ -2565,28 +2335,23 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
             </div>
             {!isReadOnly && (
               <button
+                type="button"
                 onClick={() => {
                   setEditingDonation(null);
                   setDonationDate(new Date().toISOString().split('T')[0]);
-                  setDonationDesc('');
                   setDonationAmount('');
+                  setDonationDesc('');
+                  setDonationPercent(emergencyPercent);
                   setDonationEvidence('');
-                  const curM = String(new Date().getMonth() + 1).padStart(2, '0');
-                  const allKnownRounds = [
-                    ...groupedDonationBatches.map((b) => b.batchRound || 1),
-                    ...groupedTeamBatches.map((b) => b.meta.round || 1),
-                  ];
-                  const nextR = allKnownRounds.length > 0 ? Math.max(...allKnownRounds) + 1 : 1;
-                  setDonationBatchRound(nextR);
-                  setDonationBatchMonth(curM);
-                  setDonationBatchName(language === 'lo' ? `ຊຸດ ${nextR} ເດືອນ ${parseInt(curM, 10)}` : `Batch ${nextR} Month ${parseInt(curM, 10)}`);
-                  setDonationBatchId('');
+                  setDonationBatchRound(1);
+                  setDonationBatchMonth(filterMonth !== 'all' ? filterMonth : '09');
+                  setDonationBatchName('');
                   setIsAddDonationOpen(true);
                 }}
-                className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[10px] font-bold transition flex items-center gap-1 shadow-xs"
+                className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold shadow flex items-center gap-1 cursor-pointer transition active:scale-95"
               >
                 <Plus className="w-3 h-3" />
-                <span>{language === 'lo' ? 'ເພີ່ມຍອດຮັບ' : 'Add Inflow'}</span>
+                <span>{language === 'lo' ? '+ ເພີ່ມເງິນເຂົ້າ' : '+ Add Inflow'}</span>
               </button>
             )}
           </div>
@@ -2594,9 +2359,10 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
           {/* Spreadsheet Header Row: Date | Supporter | Amount */}
           <div className="grid grid-cols-12 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 px-3 py-1.5">
             <div className="col-span-3">Date (ວັນທີ)</div>
-            <div className={isReadOnly ? 'col-span-6' : 'col-span-5'}>Supporter / Purpose</div>
-            <div className="col-span-3 text-right">Amount</div>
-            {!isReadOnly && <div className="col-span-1 text-center">···</div>}
+            <div className="col-span-5">Supporter / Purpose</div>
+            <div className="col-span-4 text-right">
+              {isReadOnly ? (language === 'lo' ? 'ຈຳນວນເງິນ' : 'Amount') : (language === 'lo' ? 'ຈຳນວນ & ຈັດການ' : 'Amount & Actions')}
+            </div>
           </div>
 
           {/* Scrollable Rows - Shrinks to fit data without huge empty gaps */}
@@ -2607,25 +2373,6 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                 <p className="text-[11px] font-medium">
                   {language === 'lo' ? 'ຍັງບໍ່ມີຂໍ້ມູນເງິນສະໜັບສະໜູນ' : 'No donation records found'}
                 </p>
-                {!isReadOnly && (
-                  <button
-                    onClick={() => {
-                      setEditingDonation(null);
-                      setDonationDate(new Date().toISOString().split('T')[0]);
-                      setDonationDesc('');
-                      setDonationAmount('');
-                      setDonationEvidence('');
-                      setDonationBatchRound(1);
-                      setDonationBatchMonth(String(new Date().getMonth() + 1).padStart(2, '0'));
-                      setDonationBatchName(language === 'lo' ? `ຊຸດ 1 ເດືອນ ${new Date().getMonth() + 1}` : `Batch 1 Month ${new Date().getMonth() + 1}`);
-                      setDonationBatchId('');
-                      setIsAddDonationOpen(true);
-                    }}
-                    className="px-2.5 py-1 bg-emerald-600 text-white rounded-md text-[10px] font-bold cursor-pointer"
-                  >
-                    + {language === 'lo' ? 'ເພີ່ມລາຍການທຳອິດ' : 'Add First Record'}
-                  </button>
-                )}
               </div>
             ) : (
               filteredDonations.map((d) => {
@@ -2645,43 +2392,24 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                       {d.date}
                     </div>
 
-                    <div className={`${isReadOnly ? 'col-span-6' : 'col-span-5'} truncate pr-1`}>
+                    <div className="col-span-5 truncate pr-1">
                       <div className="font-bold text-slate-800 dark:text-white text-[11px] truncate group-hover:text-emerald-600 transition">
                         {d.description}
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isReadOnly) return;
-                            setEditingDonation(d);
-                            setDonationDate(d.date);
-                            setDonationDesc(d.description);
-                            setDonationAmount(String(d.amount));
-                            setDonationEvidence(d.evidenceUrl || '');
-                            setDonationPercent(typeof d.deductionPercent === 'number' ? d.deductionPercent : emergencyPercent);
-                            setDonationBatchRound(d.batchRound || 1);
-                            setDonationBatchName(d.batchName || '');
-                            setDonationBatchMonth(d.batchMonth || (d.date ? d.date.split('-')[1] : '09'));
-                            setDonationBatchId(d.batchId || '');
-                            setApplyPercentToBatch(false);
-                            setIsAddDonationOpen(true);
-                          }}
-                          className={`inline-flex items-center gap-0.5 text-[8.5px] font-extrabold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-200 dark:border-amber-800 ${
-                            !isReadOnly ? 'hover:bg-amber-100 dark:hover:bg-amber-900/60 hover:border-amber-400 cursor-pointer' : ''
-                          }`}
+                        <span
+                          className="inline-flex items-center gap-0.5 text-[8.5px] font-extrabold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-200 dark:border-amber-800"
                           title={language === 'lo' ? `ອັດຕາຫັກສຳຮອງ: ${typeof d.deductionPercent === 'number' ? d.deductionPercent : emergencyPercent}%` : `Deduction: ${typeof d.deductionPercent === 'number' ? d.deductionPercent : emergencyPercent}%`}
                         >
                           🛡️ {typeof d.deductionPercent === 'number' ? d.deductionPercent : emergencyPercent}%
-                        </button>
+                        </span>
                         {d.evidenceUrl && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setPreviewSlipUrl(d.evidenceUrl || null);
                             }}
-                            className="inline-flex items-center gap-1 text-[9.5px] text-emerald-600 dark:text-emerald-400 hover:underline font-bold"
+                            className="inline-flex items-center gap-1 text-[9.5px] text-emerald-600 dark:text-emerald-400 hover:underline font-bold cursor-pointer"
                           >
                             <ImageIcon className="w-2.5 h-2.5" />
                             <span>{language === 'lo' ? 'ສະລິບ' : 'Slip'}</span>
@@ -2690,44 +2418,46 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                       </div>
                     </div>
 
-                    <div className="col-span-3 text-right font-bold text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
-                      {d.amount.toLocaleString()} {currency}
+                    <div className="col-span-4 flex items-center justify-end gap-1.5">
+                      <span className="font-bold text-[11px] text-emerald-600 dark:text-emerald-400 font-mono whitespace-nowrap">
+                        {d.amount.toLocaleString()} {currency}
+                      </span>
+                      {!isReadOnly && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingDonation(d);
+                              setDonationDate(d.date || new Date().toISOString().split('T')[0]);
+                              setDonationAmount(String(d.amount));
+                              setDonationDesc(d.description || '');
+                              setDonationPercent(typeof d.deductionPercent === 'number' ? d.deductionPercent : emergencyPercent);
+                              setDonationEvidence(d.evidenceUrl || '');
+                              setDonationBatchRound(d.batchRound || 1);
+                              setDonationBatchMonth(d.batchMonth || '09');
+                              setDonationBatchName(d.batchName || '');
+                              setIsAddDonationOpen(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-emerald-600 rounded hover:bg-emerald-100/50 dark:hover:bg-emerald-950/50 transition cursor-pointer"
+                            title={language === 'lo' ? 'ແກ້ໄຂ' : 'Edit'}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteDonation(d.id, d.description, d.amount, d.date);
+                            }}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-100/50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                            title={language === 'lo' ? 'ລຶບ' : 'Delete'}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
                     </div>
-
-                    {!isReadOnly && (
-                      <div className="col-span-1 flex items-center justify-center gap-0.5">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingDonation(d);
-                            setDonationDate(d.date);
-                            setDonationDesc(d.description);
-                            setDonationAmount(String(d.amount));
-                            setDonationEvidence(d.evidenceUrl || '');
-                            setDonationPercent(typeof d.deductionPercent === 'number' ? d.deductionPercent : emergencyPercent);
-                            setDonationBatchRound(d.batchRound || 1);
-                            setDonationBatchName(d.batchName || '');
-                            setDonationBatchMonth(d.batchMonth || (d.date ? d.date.split('-')[1] : '09'));
-                            setDonationBatchId(d.batchId || '');
-                            setIsAddDonationOpen(true);
-                          }}
-                          className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded transition"
-                          title="Edit"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteDonation(d.id);
-                          }}
-                          className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 rounded transition"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    )}
                   </div>
                 );
               })
@@ -2743,62 +2473,64 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                   : 'ລວມຍອດຮັບທັງໝົດ:'
                 : 'Total Inflow:'}
             </span>
-            <span className="text-emerald-600 dark:text-emerald-400 text-xs font-bold font-mono">
-              {filteredInflowSum.toLocaleString()} {currency}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-[9.5px] font-normal">
+                ({language === 'lo' ? 'Total ທຸກຊຸດ:' : 'All Batches:'}{' '}
+                <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
+                  {totalBalanceAll.toLocaleString()} {currency}
+                </span>)
+              </span>
+              <span className="text-emerald-600 dark:text-emerald-400 text-xs font-bold font-mono">
+                {filteredInflowSum.toLocaleString()} {currency}
+              </span>
+            </div>
           </div>
         </div>
 
         {/* 2. MIDDLE SECTION: Emergency Outflow Transfers (ການໂອນເງິນສຸກເສິນ - 20% Reserve) */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-auto">
+        <div className="bg-white dark:bg-slate-800 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-auto">
           {/* Main Top Header Bar */}
-          <div className="bg-[#881337] text-white px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div className="bg-[#881337] text-white px-3 py-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
               <ShieldAlert className="w-3.5 h-3.5 text-rose-300" />
               <h3 className="text-[11px] font-black uppercase tracking-wider">
                 {language === 'lo' ? '🚨 ການໂອນເງິນສຸກເສິນ (Emergency)' : 'Emergency Transfers'}
               </h3>
             </div>
-
             {!isReadOnly && (
               <button
+                type="button"
                 onClick={() => {
                   setEditingEmergency(null);
-                  const nextIdx = groupedEmergencyBatches.length + 1;
-                  const newBatchDefaultName = language === 'lo' ? `ສຸກເສິນ ງວດ ${nextIdx}` : `Emergency #${nextIdx}`;
-                  setEmBatchName(newBatchDefaultName);
-                  setEmBatchId(`em_batch_${Date.now()}`);
+                  setEmBatchId('');
+                  setEmBatchName(language === 'lo' ? `ສຸກເສິນ ງວດ ${groupedEmergencyBatches.length + 1}` : `Emergency #${groupedEmergencyBatches.length + 1}`);
                   setEmRecipient('');
                   setEmAmount('');
                   setEmDate(new Date().toISOString().split('T')[0]);
-                  setEmTime(
-                    `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`
-                  );
+                  setEmTime('12:00');
                   setEmEvidence('');
                   setEmStatus('transferred');
                   setEmNotes('');
                   setIsAddEmergencyOpen(true);
                 }}
-                className="px-2 py-0.5 bg-rose-500 hover:bg-rose-400 text-white rounded-md text-[10px] font-bold transition flex items-center gap-1 shadow-xs"
-                title="Create a new emergency transfer batch"
+                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold shadow flex items-center gap-1 cursor-pointer transition active:scale-95"
+                title={language === 'lo' ? 'ເພີ່ມລາຍການໂອນສຸກເສິນ' : 'Add Emergency Transfer'}
               >
                 <Plus className="w-3 h-3" />
-                <span>{language === 'lo' ? '➕ ສ້າງງວດສຸກເສິນ' : '+ Add Emergency'}</span>
+                <span>{language === 'lo' ? '+ ໂອນສຸກເສິນ' : '+ Add Transfer'}</span>
               </button>
             )}
           </div>
 
-          {/* Emergency Summary Bar: Batch Count Only (Hidden in ReadOnly Finance Overview) */}
-          {!isReadOnly && (
-            <div className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-3 py-1 flex items-center justify-end text-[10px]">
-              <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
-                <span>{language === 'lo' ? 'ຈຳນວນງວດສຸກເສິນ:' : 'Emergency Batches:'}</span>
-                <span className="font-mono font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-200 dark:border-rose-800/60">
-                  {groupedEmergencyBatches.length} {language === 'lo' ? 'ງວດ' : 'Batches'}
-                </span>
-              </div>
+          {/* Emergency Summary Bar: Batch Count */}
+          <div className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-3 py-1 flex items-center justify-end text-[10px]">
+            <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+              <span>{language === 'lo' ? 'ຈຳນວນງວດສຸກເສິນ:' : 'Emergency Batches:'}</span>
+              <span className="font-mono font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-200 dark:border-rose-800/60">
+                {groupedEmergencyBatches.length} {language === 'lo' ? 'ງວດ' : 'Batches'}
+              </span>
             </div>
-          )}
+          </div>
 
           {/* Scrollable Container with Clean Emergency Batch Items - Shrinks to fit content */}
           <div className="p-2.5 sm:p-3 space-y-3 overflow-y-auto max-h-[480px] bg-white dark:bg-slate-800/60">
@@ -2815,32 +2547,6 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                       : 'Emergency reserve is fully intact and safely stored'}
                   </p>
                 </div>
-
-                {!isReadOnly && (
-                  <div className="flex justify-center gap-2 pt-1">
-                    <button
-                      onClick={() => {
-                        setEditingEmergency(null);
-                        setEmBatchName(language === 'lo' ? 'ສຸກເສິນ ງວດ 1' : 'Emergency #1');
-                        setEmBatchId(`em_batch_${Date.now()}`);
-                        setEmRecipient('');
-                        setEmAmount('');
-                        setEmDate(new Date().toISOString().split('T')[0]);
-                        setEmTime(
-                          `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`
-                        );
-                        setEmEvidence('');
-                        setEmStatus('transferred');
-                        setEmNotes('');
-                        setIsAddEmergencyOpen(true);
-                      }}
-                      className="px-3 py-1.5 bg-rose-600 text-white font-bold text-[10px] rounded-lg hover:bg-rose-500 shadow-xs flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>{language === 'lo' ? '➕ ບັນທຶກການໂອນສຸກເສິນ' : '+ Record Emergency Outflow'}</span>
-                    </button>
-                  </div>
-                )}
               </div>
             ) : (
               <>
@@ -2903,63 +2609,10 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                             )}
                           </button>
 
-                          {/* Editable / Typeable Number Badge (1, 2... pure number) */}
-                          {editingEmBatchRoundId === batch.batchId ? (
-                            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="number"
-                                min="1"
-                                max="500"
-                                autoFocus
-                                value={editingEmBatchRoundValue}
-                                onChange={(e) => setEditingEmBatchRoundValue(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleSaveQuickEmBatchRound(batch, parseInt(editingEmBatchRoundValue, 10));
-                                  } else if (e.key === 'Escape') {
-                                    setEditingEmBatchRoundId(null);
-                                  }
-                                }}
-                                className="w-10 h-6 px-1 text-center font-bold text-[11px] font-mono rounded bg-white dark:bg-slate-900 border-2 border-rose-500 text-rose-900 dark:text-rose-200 shadow-sm focus:outline-none"
-                              />
-                              <button
-                                type="button"
-                                disabled={isSavingQuickEmRound}
-                                onClick={() => handleSaveQuickEmBatchRound(batch, parseInt(editingEmBatchRoundValue, 10))}
-                                className="p-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold transition shadow-xs cursor-pointer"
-                                title={language === 'lo' ? 'ບັນທຶກເລກງວດ' : 'Save Batch #'}
-                              >
-                                {isSavingQuickEmRound ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingEmBatchRoundId(null)}
-                                className="p-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] hover:bg-slate-300 transition cursor-pointer"
-                                title={language === 'lo' ? 'ຍົກເລີກ' : 'Cancel'}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingEmBatchRoundId(batch.batchId);
-                                setEditingEmBatchRoundValue(String(emRoundNum));
-                              }}
-                              className="group relative flex items-center justify-center shrink-0 cursor-pointer"
-                              title={language === 'lo' ? 'ກົດເພື່ອແກ້ໄຂ ຫຼື ຂຽນເລກງວດເອງ' : 'Click to edit or type batch number'}
-                            >
-                              <span className="w-6 h-6 rounded-md bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center justify-center font-mono shadow-xs transition transform active:scale-95">
-                                {emRoundNum}
-                              </span>
-                              <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-slate-900 text-rose-300 flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow-xs">
-                                <Edit2 className="w-1.5 h-1.5" />
-                              </span>
-                            </button>
-                          )}
+                          {/* Round Number Badge */}
+                          <span className="w-6 h-6 rounded-md bg-rose-600 text-white font-bold text-[11px] flex items-center justify-center font-mono shadow-xs shrink-0">
+                            {emRoundNum}
+                          </span>
 
                           {batch.batchName && !batch.batchName.toLowerCase().startsWith('emergency') && !batch.batchName.startsWith('ສຸກເສິນ') && (
                             <span className="font-bold text-[11px] text-slate-800 dark:text-white">
@@ -2983,39 +2636,25 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                             </span>
                           )}
                         </div>
-
-                        {/* Right Side: Quick Admin Actions */}
+                        {/* Emergency Batch Actions */}
                         {!isReadOnly && (
-                          <div className="flex items-center gap-1 ml-auto">
-                            {/* Add Item to This Emergency Batch */}
+                          <div className="flex items-center gap-1">
                             <button
-                              onClick={() => {
-                                setEditingEmergency(null);
-                                setEmBatchId(batch.batchId);
-                                setEmBatchName(batch.batchName);
-                                setEmRecipient('');
-                                setEmAmount('');
-                                setEmDate(batch.transferDate);
-                                setEmTime(batch.transferTime || '12:00');
-                                setEmEvidence('');
-                                setEmStatus('transferred');
-                                setEmNotes('');
-                                setIsAddEmergencyOpen(true);
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteBatch(
+                                  batch.batchId,
+                                  batch.batchName || (language === 'lo' ? `ສຸກເສິນ ງວດ ${emRoundNum}` : `Emergency #${emRoundNum}`),
+                                  batch.items.length,
+                                  batch.items.map((it: any) => it.id)
+                                );
                               }}
-                              className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold transition flex items-center gap-0.5 shadow-xs"
-                              title={language === 'lo' ? 'ເພີ່ມລາຍການໃນງວດສຸກເສິນນີ້' : 'Add item to this emergency batch'}
+                              className="px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded hover:bg-rose-100/50 dark:hover:bg-rose-950/50 transition cursor-pointer flex items-center gap-0.5 font-bold"
+                              title={language === 'lo' ? 'ລຶບງວດສຸກເສິນນີ້ທັງໝົດ' : 'Delete Emergency Batch'}
                             >
-                              <Plus className="w-2.5 h-2.5" />
-                              <span>{language === 'lo' ? 'ເພີ່ມ' : 'Add'}</span>
-                            </button>
-
-                            {/* Delete Entire Batch */}
-                            <button
-                              onClick={() => handleDeleteBatch(batch.batchId, batch.batchName, batch.items.length)}
-                              className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 rounded transition"
-                              title={language === 'lo' ? 'ລຶບງວດນີ້ທັງໝົດ' : 'Delete entire batch'}
-                            >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-2.5 h-2.5 text-rose-500" />
+                              <span className="hidden xs:inline">{language === 'lo' ? 'ລຶບງວດ' : 'Delete'}</span>
                             </button>
                           </div>
                         )}
@@ -3044,15 +2683,16 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                           {batch.items.map((d) => (
                             <div
                               key={d.id}
-                              className="grid grid-cols-12 items-center px-3 py-2 hover:bg-rose-50/50 dark:hover:bg-slate-750/50 text-xs transition"
+                              onClick={() => setSelectedDistDetail(d)}
+                              className="grid grid-cols-12 items-center px-3 py-2 hover:bg-rose-50/70 dark:hover:bg-slate-750/70 text-xs transition cursor-pointer group"
                             >
                               {/* Recipient & Emergency Transfer Purpose / Note (ໂອນເຮັດຫຍັງ) */}
-                              <div className={`${isReadOnly ? 'col-span-5' : 'col-span-5'} flex items-start gap-2 min-w-0 py-0.5 pr-1`}>
+                              <div className="col-span-6 flex items-start gap-2 min-w-0 py-0.5 pr-1">
                                 <div className="w-6 h-6 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 flex items-center justify-center font-bold text-[10px] shrink-0 border border-rose-300 dark:border-rose-700 shadow-xs mt-0.5">
                                   <ShieldAlert className="w-3 h-3 text-rose-600 dark:text-rose-400" />
                                 </div>
                                 <div className="min-w-0 flex-1 space-y-0.5">
-                                  <div className="font-bold text-slate-800 dark:text-white text-[11px]">
+                                  <div className="font-bold text-slate-800 dark:text-white text-[11px] group-hover:text-rose-600 dark:group-hover:text-rose-400 transition">
                                     {d.recipientName}
                                   </div>
                                   {/* ໝາຍເຫດວ່າ ໂອນເຮັດຫຍັງ (Emergency Purpose / Note) */}
@@ -3072,65 +2712,62 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                               </div>
 
                               {/* Amount */}
-                              <div className={`${isReadOnly ? 'col-span-4' : 'col-span-3'} text-left pl-2 sm:pl-4 font-bold text-[11px] sm:text-xs text-rose-600 dark:text-rose-400 font-mono whitespace-nowrap`}>
+                              <div className="col-span-4 text-left pl-2 sm:pl-4 font-bold text-[11px] sm:text-xs text-rose-600 dark:text-rose-400 font-mono whitespace-nowrap">
                                 {d.amount.toLocaleString()} {currency}
                               </div>
 
-                              {/* Evidence Slip */}
-                              <div className={`${isReadOnly ? 'col-span-3' : 'col-span-2'} text-center flex items-center justify-end gap-1 pr-1 sm:pr-2`}>
-                                {d.evidenceUrl ? (
+                              {/* Actions: Evidence Slip, Edit, Delete */}
+                              <div className="col-span-2 text-center flex items-center justify-end gap-1 pr-1 sm:pr-2">
+                                {d.evidenceUrl && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setPreviewSlipUrl(d.evidenceUrl || null);
                                     }}
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 rounded text-[9px] font-bold border border-rose-300 dark:border-rose-700 shadow-xs hover:bg-rose-100 transition cursor-pointer"
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 rounded text-[9px] font-bold border border-rose-300 dark:border-rose-700 shadow-xs hover:bg-rose-100 transition cursor-pointer"
+                                    title={language === 'lo' ? 'ເບິ່ງສະລິບ' : 'Slip'}
                                   >
                                     <ImageIcon className="w-2.5 h-2.5 text-rose-500" />
-                                    <span>{language === 'lo' ? 'ສະລິບ' : 'Slip'}</span>
+                                    <span className="hidden xs:inline">{language === 'lo' ? 'ສະລິບ' : 'Slip'}</span>
                                   </button>
-                                ) : (
-                                  <span className="text-[9px] text-slate-400 italic">
-                                    -
-                                  </span>
+                                )}
+                                {!isReadOnly && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingEmergency(d);
+                                        setEmBatchId(d.batchId || '');
+                                        setEmBatchName(d.batchName || (language === 'lo' ? 'ສຸກເສິນ ງວດ 1' : 'Emergency #1'));
+                                        setEmRecipient(d.recipientName);
+                                        setEmAmount(String(d.amount));
+                                        setEmDate(d.transferDate || new Date().toISOString().split('T')[0]);
+                                        setEmTime(d.transferTime || '12:00');
+                                        setEmEvidence(d.evidenceUrl || '');
+                                        setEmStatus(d.status);
+                                        setEmNotes(d.notes || '');
+                                        setIsAddEmergencyOpen(true);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-100/50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                                      title={language === 'lo' ? 'ແກ້ໄຂ' : 'Edit'}
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteDist(d.id, d.recipientName, d.notes || d.batchName, d.amount, true);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-100/50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                                      title={language === 'lo' ? 'ລຶບ' : 'Delete'}
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </>
                                 )}
                               </div>
-
-                              {/* Actions for Admin */}
-                              {!isReadOnly && (
-                                <div className="col-span-2 flex items-center justify-end gap-0.5">
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setEditingEmergency(d);
-                                      setEmBatchId(d.batchId || batch.batchId);
-                                      setEmBatchName(d.batchName || batch.batchName);
-                                      setEmRecipient(d.recipientName);
-                                      setEmAmount(String(d.amount));
-                                      setEmDate(d.transferDate);
-                                      setEmTime(d.transferTime || batch.transferTime || '12:00');
-                                      setEmEvidence(d.evidenceUrl || '');
-                                      setEmStatus(d.status);
-                                      setEmNotes(d.notes || '');
-                                      setIsAddEmergencyOpen(true);
-                                    }}
-                                    className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded transition"
-                                    title="Edit"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteDist(d.id);
-                                    }}
-                                    className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 rounded transition"
-                                    title="Delete"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              )}
                             </div>
                           ))}
 
@@ -3164,168 +2801,115 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                   : 'ລວມໂອນສຸກເສິນທັງໝົດ:'
                 : 'Total Emergency Outflow:'}
             </span>
-            <span className="text-rose-600 dark:text-rose-400 text-xs font-bold font-mono">
-              {filteredEmergencyOutflowSum.toLocaleString()} {currency}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-[9.5px] font-normal">
+                ({language === 'lo' ? 'Total ທຸກຊຸດ:' : 'All Batches:'}{' '}
+                <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
+                  {totalEmergencyTransferred.toLocaleString()} {currency}
+                </span>)
+              </span>
+              <span className="text-rose-600 dark:text-rose-400 text-xs font-bold font-mono">
+                {filteredEmergencyOutflowSum.toLocaleString()} {currency}
+              </span>
+            </div>
           </div>
         </div>
 
         {/* 3. RIGHT SECTION: Distribution to Team Members in Batches (ການໂອນສະໜັບສະໜູນທີມ - 80% Pool) */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-auto">
+        <div className="bg-white dark:bg-slate-800 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-auto">
           {/* Main Top Header Bar */}
-          <div className="bg-[#1e3a5f] text-white px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div className="bg-[#1e3a5f] text-white px-3 py-2 flex flex-wrap items-center justify-between gap-1.5">
             <div className="flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5 text-amber-400" />
               <h3 className="text-[11px] font-black uppercase tracking-wider">
                 {language === 'lo' ? '👥 ການໂອນສະໜັບສະໜູນທີມ (Team Support)' : 'Team Support'}
               </h3>
             </div>
-
             {!isReadOnly && (
-              <div className="flex items-center gap-1 flex-wrap">
-                {/* Plus Button: Create New Batch / Set (ສ້າງຊຸດ / ງວດໃໝ່) */}
+              <div className="flex items-center gap-1.5">
                 <button
+                  type="button"
                   onClick={() => {
                     setEditingDist(null);
-                    const now = new Date();
-                    const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-                    const currentYear = String(now.getFullYear());
-                    const allKnownRounds = [
-                      ...groupedTeamBatches.map((b) => b.meta.round || 1),
-                      ...groupedDonationBatches.map((b) => b.batchRound || 1),
-                    ];
-                    const nextRound = allKnownRounds.length > 0 ? Math.max(...allKnownRounds) + 1 : 1;
-                    const newBatchDefaultName =
-                      language === 'lo'
-                        ? `ຊຸດ ${nextRound} ເດືອນ ${parseInt(currentMonth, 10)}`
-                        : `Batch ${nextRound} Month ${parseInt(currentMonth, 10)}`;
+                    setDistBatchId('');
+                    const currentMonthStr = filterMonth !== 'all' ? filterMonth : (new Date().getMonth() + 1).toString().padStart(2, '0');
+                    const nextRound = groupedTeamBatches.length + 1;
                     setDistRound(nextRound);
-                    setDistMonth(currentMonth);
-                    setDistYear(currentYear);
-                    setDistBatchName(newBatchDefaultName);
-                    setDistBatchId(`batch_${Date.now()}`);
+                    setDistMonth(currentMonthStr);
+                    setDistBatchName(language === 'lo' ? `ຊຸດ ${nextRound} ເດືອນ ${parseInt(currentMonthStr, 10)}` : `Batch ${nextRound} Month ${parseInt(currentMonthStr, 10)}`);
                     setDistRecipient(activeTeams[0]?.name || '');
                     setDistAmount('');
-                    setDistDate(now.toISOString().split('T')[0]);
-                    setDistTime(
-                      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-                    );
+                    setDistDate(new Date().toISOString().split('T')[0]);
+                    setDistTime('12:00');
                     setDistEvidence('');
                     setDistStatus('transferred');
                     setDistNotes('');
                     setIsAddDistOpen(true);
                   }}
-                  className="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-md text-[10px] font-bold transition flex items-center gap-1 shadow-xs"
-                  title={language === 'lo' ? 'ສ້າງຊຸດ ຫຼື ງວດການໂອນໃໝ່' : 'Create new batch / set'}
+                  className="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] flex items-center gap-1 shadow-xs transition cursor-pointer active:scale-95"
+                  title={language === 'lo' ? 'ເພີ່ມລາຍການໂອນໃຫ້ທີມ' : 'Add Team Transfer'}
                 >
-                  <Plus className="w-3 h-3" />
-                  <span>{language === 'lo' ? '➕ ສ້າງຊຸດ' : '+ Add Batch'}</span>
-                </button>
-
-                {/* Auto Team Split Button (ແບ່ງປັນອັດຕະໂນມັດຕາມຊຸດ) */}
-                <button
-                  onClick={() => {
-                    const now = new Date();
-                    const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-                    const currentYear = String(now.getFullYear());
-                    const allKnownRounds = [
-                      ...groupedTeamBatches.map((b) => b.meta.round || 1),
-                      ...groupedDonationBatches.map((b) => b.batchRound || 1),
-                    ];
-                    const nextRound = allKnownRounds.length > 0 ? Math.max(...allKnownRounds) + 1 : 1;
-                    const newBatchDefaultName =
-                      language === 'lo'
-                        ? `ຊຸດ ${nextRound} ເດືອນ ${parseInt(currentMonth, 10)}`
-                        : `Batch ${nextRound} Month ${parseInt(currentMonth, 10)}`;
-                    setAutoBatchRound(nextRound);
-                    setAutoBatchMonth(currentMonth);
-                    setAutoBatchYear(currentYear);
-                    setAutoBatchName(newBatchDefaultName);
-                    setAutoBatchDate(now.toISOString().split('T')[0]);
-                    setAutoBatchTime(
-                      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-                    );
-                    setAutoBatchCustomPool('');
-                    setAutoBatchNotes('');
-                    setIsAutoBatchModalOpen(true);
-                  }}
-                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-md text-[10px] font-bold transition flex items-center gap-1 border border-slate-700 shadow-xs"
-                  title={`Auto calculate and divide ${teamPercent}% equally to all team members`}
-                >
-                  <Sparkles className="w-2.5 h-2.5 text-amber-400" />
-                  <span>{language === 'lo' ? `⚡ ແບ່ງ ${teamPercent}%` : `Auto ${teamPercent}%`}</span>
+                  <Plus className="w-3 h-3 text-slate-950" />
+                  <span>{language === 'lo' ? '+ ໂອນໃຫ້ທີມ' : '+ Add Transfer'}</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* Team Summary Bar & Batch/Set Switcher Tabs (Hidden in ReadOnly Finance Overview) */}
-          {!isReadOnly && (
-            <div className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5 space-y-1.5">
-              <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                <div className="flex items-center gap-1 text-[10px]">
-                  <Package className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                  <span className="font-bold text-slate-700 dark:text-slate-200">
-                    {language === 'lo' ? 'ການແບ່ງຊຸດ/ເດືອນ:' : 'Batch / Month Groups:'}
-                  </span>
-                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-200 dark:border-amber-800">
-                    {groupedTeamBatches.length} {language === 'lo' ? 'ຊຸດ' : 'Batches'}
-                  </span>
-                </div>
-
-                {!isReadOnly && hasMultipleSingleBatchesOnSameDay && (
-                  <button
-                    onClick={handleQuickMergeAllToBatch1Month8}
-                    className="px-1.5 py-0.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-950/80 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold transition flex items-center gap-1 border border-blue-300 dark:border-blue-800 shadow-xs"
-                    title={language === 'lo' ? 'ຮວມລາຍການໂອນທີມທັງໝົດເຂົ້າເປັນ ຊຸດ 1 ເດືອນ 8 ດຽວກັນ' : 'Merge all into Batch 1 Month 8'}
-                  >
-                    <RotateCcw className="w-2.5 h-2.5 text-blue-600 dark:text-blue-400" />
-                    <span>{language === 'lo' ? '⚡ ຮວມເປັນ "ຊຸດ 1 ເດືອນ 8"' : '⚡ Merge to Batch 1 Month 8'}</span>
-                  </button>
-                )}
+          {/* Team Summary Bar & Batch/Set Switcher Tabs */}
+          <div className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-1.5 flex-wrap">
+              <div className="flex items-center gap-1 text-[10px]">
+                <Package className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                <span className="font-bold text-slate-700 dark:text-slate-200">
+                  {language === 'lo' ? 'ການແບ່ງຊຸດ/ເດືອນ:' : 'Batch / Month Groups:'}
+                </span>
+                <span className="font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-200 dark:border-amber-800">
+                  {groupedTeamBatches.length} {language === 'lo' ? 'ຊຸດ' : 'Batches'}
+                </span>
               </div>
-
-              {/* Batch Filter Pills (ທຸກຊຸດ, ຊຸດ 1 ເດືອນ 8, ຊຸດ 2 ເດືອນ 9...) */}
-              {uniqueBatchOptions.length > 1 && (
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5 pt-0.5 no-scrollbar">
-                  <button
-                    onClick={() => setSelectedTeamBatchFilter('all')}
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1 ${
-                      selectedTeamBatchFilter === 'all'
-                        ? 'bg-amber-500 text-slate-950 shadow-xs'
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
-                    }`}
-                  >
-                    <span>{language === 'lo' ? 'ທຸກຊຸດ' : 'All Batches'}</span>
-                    <span className="text-[9px] px-1 py-0.2 rounded-full bg-slate-200/80 dark:bg-slate-700 text-slate-800 dark:text-white">
-                      {groupedTeamBatches.length}
-                    </span>
-                  </button>
-
-                  {uniqueBatchOptions.map((opt) => {
-                    const isActive = selectedTeamBatchFilter.toLowerCase() === opt.key;
-                    return (
-                      <button
-                        key={opt.key}
-                        onClick={() => setSelectedTeamBatchFilter(isActive ? 'all' : opt.key)}
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1 ${
-                          isActive
-                            ? 'bg-amber-500 text-slate-950 shadow-xs'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
-                        }`}
-                      >
-                        <Package className="w-2.5 h-2.5 text-amber-500" />
-                        <span>{opt.label}</span>
-                        <span className={`text-[9px] px-1 py-0.2 rounded-full ${isActive ? 'bg-slate-950 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
-                          {opt.count} {language === 'lo' ? 'ຄົນ' : 'recipients'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
-          )}
+
+            {/* Batch Filter Pills (ທຸກຊຸດ, ຊຸດ 1 ເດືອນ 8, ຊຸດ 2 ເດືອນ 9...) */}
+            {uniqueBatchOptions.length > 1 && (
+              <div className="flex items-center gap-1 overflow-x-auto pb-0.5 pt-0.5 no-scrollbar">
+                <button
+                  onClick={() => setSelectedTeamBatchFilter('all')}
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1 ${
+                    selectedTeamBatchFilter === 'all'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
+                  }`}
+                >
+                  <span>{language === 'lo' ? 'ທຸກຊຸດ' : 'All Batches'}</span>
+                  <span className="text-[9px] px-1 py-0.2 rounded-full bg-slate-200/80 dark:bg-slate-700 text-slate-800 dark:text-white">
+                    {groupedTeamBatches.length}
+                  </span>
+                </button>
+
+                {uniqueBatchOptions.map((opt) => {
+                  const isActive = selectedTeamBatchFilter.toLowerCase() === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      onClick={() => setSelectedTeamBatchFilter(isActive ? 'all' : opt.key)}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap transition flex items-center gap-1 ${
+                        isActive
+                          ? 'bg-amber-500 text-slate-950 shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
+                      }`}
+                    >
+                      <Package className="w-2.5 h-2.5 text-amber-500" />
+                      <span>{opt.label}</span>
+                      <span className={`text-[9px] px-1 py-0.2 rounded-full ${isActive ? 'bg-slate-950 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                        {opt.count} {language === 'lo' ? 'ຄົນ' : 'recipients'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {/* Team Batches Quick Header Toolbar with Collapse/Expand All */}
           {displayedTeamBatches.length > 0 && (
@@ -3376,38 +2960,6 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                       : 'No transfer batches recorded for this period'}
                   </p>
                 </div>
-
-                {!isReadOnly && (
-                  <div className="flex justify-center gap-2 pt-1">
-                    <button
-                      onClick={() => {
-                        setEditingDist(null);
-                        const now = new Date();
-                        const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-                        const defaultName = language === 'lo' ? `ຊຸດ 1 ເດືອນ ${parseInt(currentMonth, 10)}` : `Batch 1 Month ${parseInt(currentMonth, 10)}`;
-                        setDistRound(1);
-                        setDistMonth(currentMonth);
-                        setDistYear(String(now.getFullYear()));
-                        setDistBatchName(defaultName);
-                        setDistBatchId(`batch_${Date.now()}`);
-                        setDistRecipient(activeTeams[0]?.name || '');
-                        setDistAmount('');
-                        setDistDate(now.toISOString().split('T')[0]);
-                        setDistTime(
-                          `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-                        );
-                        setDistEvidence('');
-                        setDistStatus('transferred');
-                        setDistNotes('');
-                        setIsAddDistOpen(true);
-                      }}
-                      className="px-3 py-1.5 bg-amber-500 text-slate-950 font-bold text-[10px] rounded-lg hover:bg-amber-400 shadow-xs flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>{language === 'lo' ? '➕ ສ້າງຊຸດ 1' : '+ Create Batch #1'}</span>
-                    </button>
-                  </div>
-                )}
               </div>
             ) : (
               displayedTeamBatches.map((batch, bIdx) => {
@@ -3419,31 +2971,74 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                     key={batch.batchId}
                     className="border-b-2 border-slate-300 dark:border-slate-650 pb-3 mb-3 last:border-b-0 last:pb-0 last:mb-0 space-y-2"
                   >
-                    {/* If Collapsed: Show ONLY Batch Round and Month as requested by user */}
+                    {/* If Collapsed: Show Batch Round, Month, Total and Actions */}
                     {isCollapsed ? (
                       <div
                         onClick={() => toggleTeamBatchCollapse(batch.batchId, bIdx)}
-                        className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-amber-50/70 dark:hover:bg-slate-750/70 transition cursor-pointer select-none group"
+                        className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg hover:bg-amber-50/70 dark:hover:bg-slate-750/70 transition cursor-pointer select-none group"
                         title={language === 'lo' ? 'ກົດເພື່ອເປີດເບິ່ງລາຍຊື່' : 'Click to expand'}
                       >
-                        <div className="p-0.5 text-slate-400 group-hover:text-amber-500 rounded transition">
-                          <ChevronRight className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="p-0.5 text-slate-400 group-hover:text-amber-500 rounded transition">
+                            <ChevronRight className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
+                          </div>
+
+                          {/* Batch Round Number Badge */}
+                          <span className="w-6 h-6 rounded-md bg-amber-500 text-slate-950 font-bold text-[11px] flex items-center justify-center font-mono shadow-xs shrink-0">
+                            {batch.meta.round}
+                          </span>
+
+                          {/* Month Tag */}
+                          <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-[10px] border border-blue-200 dark:border-blue-800/80 shrink-0 flex items-center gap-1 shadow-xs">
+                            <Calendar className="w-3 h-3 text-blue-500" />
+                            <span>
+                              {language === 'lo'
+                                ? `ເດືອນ ${parseInt(batch.meta.month, 10)} (${batch.meta.monthNameLao})`
+                                : `Month ${parseInt(batch.meta.month, 10)} (${batch.meta.monthNameEn})`}
+                            </span>
+                          </span>
+
+                          <span className="text-[10px] text-slate-400 font-medium">
+                            • {batch.items.length} {language === 'lo' ? 'ຄົນ' : 'recipients'}
+                          </span>
                         </div>
 
-                        {/* Batch Round Number Badge */}
-                        <span className="w-6 h-6 rounded-md bg-amber-500 text-slate-950 font-bold text-[11px] flex items-center justify-center font-mono shadow-xs shrink-0">
-                          {batch.meta.round}
-                        </span>
-
-                        {/* Month Tag */}
-                        <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-[10px] border border-blue-200 dark:border-blue-800/80 shrink-0 flex items-center gap-1 shadow-xs">
-                          <Calendar className="w-3 h-3 text-blue-500" />
-                          <span>
-                            {language === 'lo'
-                              ? `ເດືອນ ${parseInt(batch.meta.month, 10)} (${batch.meta.monthNameLao})`
-                              : `Month ${parseInt(batch.meta.month, 10)} (${batch.meta.monthNameEn})`}
+                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <span className="text-xs font-bold text-amber-600 dark:text-amber-400 font-mono">
+                            {batch.totalAmount.toLocaleString()} {currency}
                           </span>
-                        </span>
+                          {!isReadOnly && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditBatch(batch);
+                                }}
+                                className="p-1 text-slate-400 hover:text-amber-600 rounded transition cursor-pointer"
+                                title={language === 'lo' ? 'ແກ້ໄຂຊຸດ' : 'Edit Batch'}
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteBatch(
+                                    batch.batchId,
+                                    batch.batchName || (language === 'lo' ? `ຊຸດ ${batch.meta.round}` : `Batch #${batch.meta.round}`),
+                                    batch.items.length,
+                                    batch.items.map((it: any) => it.id)
+                                  );
+                                }}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                                title={language === 'lo' ? 'ລຶບຊຸດນີ້ທັງໝົດ' : 'Delete Batch'}
+                              >
+                                <Trash2 className="w-3 h-3 text-rose-500" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     ) : (
                       /* Expanded Batch Header & Details */
@@ -3460,63 +3055,10 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                               <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                             </button>
 
-                            {/* Editable / Typeable Number Badge (1, 2... pure number) */}
-                            {editingBatchRoundId === batch.batchId ? (
-                              <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="500"
-                                  autoFocus
-                                  value={editingBatchRoundValue}
-                                  onChange={(e) => setEditingBatchRoundValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleSaveQuickBatchRound(batch, parseInt(editingBatchRoundValue, 10));
-                                    } else if (e.key === 'Escape') {
-                                      setEditingBatchRoundId(null);
-                                    }
-                                  }}
-                                  className="w-10 h-6 px-1 text-center font-bold text-[11px] font-mono rounded bg-white dark:bg-slate-900 border-2 border-amber-500 text-amber-900 dark:text-amber-200 shadow-sm focus:outline-none"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={isSavingQuickRound}
-                                  onClick={() => handleSaveQuickBatchRound(batch, parseInt(editingBatchRoundValue, 10))}
-                                  className="p-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-bold transition shadow-xs cursor-pointer"
-                                  title={language === 'lo' ? 'ບັນທຶກເລກຊຸດ' : 'Save Batch #'}
-                                >
-                                  {isSavingQuickRound ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingBatchRoundId(null)}
-                                  className="p-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] hover:bg-slate-300 transition cursor-pointer"
-                                  title={language === 'lo' ? 'ຍົກເລີກ' : 'Cancel'}
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingBatchRoundId(batch.batchId);
-                                  setEditingBatchRoundValue(String(batch.meta.round));
-                                }}
-                                className="group relative flex items-center justify-center shrink-0 cursor-pointer"
-                                title={language === 'lo' ? 'ກົດເພື່ອແກ້ໄຂ ຫຼື ຂຽນເລກຊຸດເອງ' : 'Click to edit or type batch number'}
-                              >
-                                <span className="w-6 h-6 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center justify-center font-mono shadow-xs transition transform active:scale-95">
-                                  {batch.meta.round}
-                                </span>
-                                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-slate-900 text-amber-300 flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow-xs">
-                                  <Edit2 className="w-1.5 h-1.5" />
-                                </span>
-                              </button>
-                            )}
+                            {/* Batch Round Number Badge */}
+                            <span className="w-6 h-6 rounded-md bg-amber-500 text-slate-950 font-bold text-[11px] flex items-center justify-center font-mono shadow-xs shrink-0">
+                              {batch.meta.round}
+                            </span>
 
                             {/* Month Tag */}
                             <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-[10px] border border-blue-200 dark:border-blue-800/80 shrink-0 flex items-center gap-1">
@@ -3554,52 +3096,37 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                               </span>
                             )}
                           </div>
-
-                          {/* Right Side: Quick Admin Actions */}
+                          {/* Team Batch Action Buttons: Edit Batch, Delete Batch */}
                           {!isReadOnly && (
-                            <div className="flex items-center gap-1 ml-auto">
-                              {/* Add Recipient to This Specific Batch */}
+                            <div className="flex items-center gap-1">
                               <button
-                                onClick={() => {
-                                  setEditingDist(null);
-                                  setDistBatchId(batch.batchId);
-                                  setDistBatchName(batch.batchName);
-                                  setDistRound(batch.meta.round);
-                                  setDistMonth(batch.meta.month);
-                                  setDistYear(batch.meta.year);
-                                  setDistRecipient(activeTeams[0]?.name || '');
-                                  setDistAmount('');
-                                  setDistDate(batch.transferDate);
-                                  setDistTime(batch.transferTime || '12:00');
-                                  setDistEvidence('');
-                                  setDistStatus('transferred');
-                                  setDistNotes('');
-                                  setIsAddDistOpen(true);
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditBatch(batch);
                                 }}
-                                className="px-1.5 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold transition flex items-center gap-0.5 shadow-xs"
-                                title={language === 'lo' ? 'ເພີ່ມສະມາຊິກຜູ້ຮັບໃນຊຸດນີ້' : 'Add recipient to this batch'}
-                              >
-                                <Plus className="w-2.5 h-2.5" />
-                                <span>{language === 'lo' ? 'ເພີ່ມຄົນ' : 'Add Member'}</span>
-                              </button>
-
-                              {/* Edit / Rename / Merge Entire Batch */}
-                              <button
-                                onClick={() => handleOpenEditBatch(batch)}
-                                className="px-1.5 py-0.5 bg-slate-150 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-650 text-slate-700 dark:text-slate-200 rounded text-[10px] font-bold transition flex items-center gap-0.5 shadow-xs"
-                                title={language === 'lo' ? 'ແກ້ໄຂຊຸດ/ເດືອນ ຫຼື ຮວມຊຸດ' : 'Edit batch round/month or merge'}
+                                className="px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400 rounded hover:bg-amber-100/50 dark:hover:bg-amber-950/50 transition cursor-pointer flex items-center gap-0.5 font-bold"
+                                title={language === 'lo' ? 'ແກ້ໄຂຊຸດ' : 'Edit Batch'}
                               >
                                 <Edit2 className="w-2.5 h-2.5" />
-                                <span>{language === 'lo' ? 'ແກ້ໄຂຊຸດ' : 'Edit'}</span>
+                                <span className="hidden xs:inline">{language === 'lo' ? 'ແກ້ໄຂ' : 'Edit'}</span>
                               </button>
-
-                              {/* Delete Entire Batch */}
                               <button
-                                onClick={() => handleDeleteBatch(batch.batchId, batch.batchName, batch.items.length)}
-                                className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 rounded transition"
-                                title={language === 'lo' ? 'ລຶບຊຸດນີ້ທັງໝົດ' : 'Delete entire batch'}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteBatch(
+                                    batch.batchId,
+                                    batch.batchName || (language === 'lo' ? `ຊຸດ ${batch.meta.round}` : `Batch #${batch.meta.round}`),
+                                    batch.items.length,
+                                    batch.items.map((it: any) => it.id)
+                                  );
+                                }}
+                                className="px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded hover:bg-rose-100/50 dark:hover:bg-rose-950/50 transition cursor-pointer flex items-center gap-0.5 font-bold"
+                                title={language === 'lo' ? 'ລຶບຊຸດນີ້ທັງໝົດ' : 'Delete Batch'}
                               >
-                                <Trash2 className="w-3 h-3" />
+                                <Trash2 className="w-2.5 h-2.5 text-rose-500" />
+                                <span className="hidden xs:inline">{language === 'lo' ? 'ລຶບຊຸດ' : 'Delete'}</span>
                               </button>
                             </div>
                           )}
@@ -3616,10 +3143,11 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                       return (
                         <div
                           key={d.id}
-                          className="grid grid-cols-12 items-center px-3 py-2 hover:bg-amber-50/40 dark:hover:bg-slate-750/50 text-xs transition"
+                          onClick={() => setSelectedDistDetail(d)}
+                          className="grid grid-cols-12 items-center px-2.5 sm:px-3 py-2 hover:bg-amber-50/70 dark:hover:bg-slate-750/70 text-xs transition cursor-pointer group"
                         >
-                          {/* Recipient Photo, Name & Private Transfer QR */}
-                          <div className={`${isReadOnly ? 'col-span-5' : 'col-span-5'} flex items-center gap-1.5 truncate pr-1`}>
+                          {/* Recipient Photo, Name & Role */}
+                          <div className="col-span-6 flex items-center gap-1.5 truncate pr-1">
                             {teamMember?.imageUrl ? (
                               <img
                                 src={teamMember.imageUrl}
@@ -3645,68 +3173,63 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                           </div>
 
                           {/* Amount */}
-                          <div className={`${isReadOnly ? 'col-span-4' : 'col-span-3'} text-left pl-2 sm:pl-4 font-bold text-[11px] sm:text-xs text-amber-600 dark:text-amber-400 font-mono whitespace-nowrap`}>
+                          <div className="col-span-4 text-left pl-2 sm:pl-4 font-bold text-[11px] sm:text-xs text-amber-600 dark:text-amber-400 font-mono whitespace-nowrap">
                             {d.amount.toLocaleString()} {currency}
                           </div>
 
-                          {/* Evidence Slip Indicator */}
-                          <div className={`${isReadOnly ? 'col-span-3' : 'col-span-2'} text-center flex items-center justify-end gap-1 pr-1 sm:pr-2`}>
-                            {d.evidenceUrl ? (
+                          {/* Actions: Evidence Slip, Edit, Delete */}
+                          <div className="col-span-2 text-center flex items-center justify-end gap-1 pr-1 sm:pr-2">
+                            {d.evidenceUrl && (
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setPreviewSlipUrl(d.evidenceUrl || null);
                                 }}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 rounded text-[9px] font-bold border border-emerald-300 dark:border-emerald-700 shadow-xs hover:bg-emerald-100 transition"
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 rounded text-[9px] font-bold border border-emerald-300 dark:border-emerald-700 shadow-xs hover:bg-emerald-100 transition cursor-pointer"
+                                title={language === 'lo' ? 'ເບິ່ງສະລິບ' : 'Slip'}
                               >
                                 <ImageIcon className="w-2.5 h-2.5 text-emerald-500" />
-                                <span>{language === 'lo' ? 'ສະລິບ' : 'Slip'}</span>
+                                <span className="hidden xs:inline">{language === 'lo' ? 'ສະລິບ' : 'Slip'}</span>
                               </button>
-                            ) : (
-                              <span className="text-[9px] text-slate-400 italic">
-                                -
-                              </span>
+                            )}
+                            {!isReadOnly && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingDist(d);
+                                    setDistBatchId(d.batchId || '');
+                                    setDistBatchName(d.batchName || (language === 'lo' ? 'ງວດທີ 1' : 'Batch #1'));
+                                    setDistRecipient(d.recipientName);
+                                    setDistAmount(String(d.amount));
+                                    setDistDate(d.transferDate || new Date().toISOString().split('T')[0]);
+                                    setDistTime(d.transferTime || '12:00');
+                                    setDistEvidence(d.evidenceUrl || '');
+                                    setDistStatus(d.status);
+                                    setDistNotes(d.notes || '');
+                                    setIsAddDistOpen(true);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-amber-600 rounded hover:bg-amber-100/50 dark:hover:bg-amber-950/50 transition cursor-pointer"
+                                  title={language === 'lo' ? 'ແກ້ໄຂ' : 'Edit'}
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteDist(d.id, d.recipientName, d.notes || d.batchName, d.amount, false);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-100/50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                                  title={language === 'lo' ? 'ລຶບ' : 'Delete'}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </>
                             )}
                           </div>
-
-                          {/* Actions for Admin */}
-                          {!isReadOnly && (
-                            <div className="col-span-2 flex items-center justify-end gap-0.5">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingDist(d);
-                                  setDistBatchId(d.batchId || batch.batchId);
-                                  setDistBatchName(d.batchName || batch.batchName);
-                                  setDistRound(d.batchRound || batch.meta.round || 1);
-                                  setDistMonth(d.batchMonth || batch.meta.month || '08');
-                                  setDistYear(d.transferDate?.split('-')[0] || batch.meta.year || '2026');
-                                  setDistRecipient(d.recipientName);
-                                  setDistAmount(String(d.amount));
-                                  setDistDate(d.transferDate);
-                                  setDistTime(d.transferTime || batch.transferTime || '12:00');
-                                  setDistEvidence(d.evidenceUrl || '');
-                                  setDistStatus(d.status);
-                                  setDistNotes(d.notes || '');
-                                  setIsAddDistOpen(true);
-                                }}
-                                className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded transition"
-                                title="Edit"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteDist(d.id);
-                                }}
-                                className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 rounded transition"
-                                title="Delete"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )}
                         </div>
                       );
                     })}
@@ -3741,9 +3264,17 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                   : 'ລວມຍອດໂອນໃຫ້ລູກທີມທັງໝົດ:'
                 : 'Total Team Distributed:'}
             </span>
-            <span className="text-amber-600 dark:text-amber-400 text-xs font-bold font-mono">
-              {filteredTeamOutflowSum.toLocaleString()} {currency}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-[9.5px] font-normal">
+                ({language === 'lo' ? 'Total ທຸກຊຸດ:' : 'All Batches:'}{' '}
+                <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
+                  {totalTeamTransferred.toLocaleString()} {currency}
+                </span>)
+              </span>
+              <span className="text-amber-600 dark:text-amber-400 text-xs font-bold font-mono">
+                {filteredTeamOutflowSum.toLocaleString()} {currency}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -3755,7 +3286,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
           onClick={() => setIsAddDonationOpen(false)}
         >
           <div
-            className="bg-white dark:bg-slate-800 rounded-3xl p-5 sm:p-6 max-w-md w-full border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 animate-scale-in max-h-[90vh] flex flex-col my-auto"
+            className="bg-white dark:bg-slate-800 rounded-none p-5 sm:p-6 max-w-md w-full border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 animate-scale-in max-h-[90vh] flex flex-col my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700 shrink-0">
@@ -4013,7 +3544,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
           onClick={() => setIsAutoBatchModalOpen(false)}
         >
           <div
-            className="bg-white dark:bg-slate-800 rounded-3xl p-5 sm:p-6 max-w-md w-full border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 animate-scale-in max-h-[90vh] flex flex-col my-auto"
+            className="bg-white dark:bg-slate-800 rounded-none p-5 sm:p-6 max-w-md w-full border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 animate-scale-in max-h-[90vh] flex flex-col my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700 shrink-0">
@@ -4032,7 +3563,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
 
             <div className="space-y-3.5 text-xs overflow-y-auto pr-1 flex-1">
               {/* Round (ຊຸດ) and Month (ເດືອນ) Selectors */}
-              <div className="bg-amber-50/80 dark:bg-amber-950/30 p-3 rounded-2xl border border-amber-200 dark:border-amber-800/60 space-y-2.5">
+              <div className="bg-amber-50/80 dark:bg-amber-950/30 p-3 rounded-none border border-amber-200 dark:border-amber-800/60 space-y-2.5">
                 <div className="font-bold text-amber-900 dark:text-amber-200 text-xs flex items-center gap-1.5">
                   <Package className="w-4 h-4 text-amber-600" />
                   <span>{language === 'lo' ? 'ກຳນົດຊຸດ ແລະ ເດືອນ (Set & Month Selection)' : 'Set Batch Round & Month'}</span>
@@ -4206,13 +3737,13 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
           }}
         >
           <div
-            className="bg-white dark:bg-slate-800 rounded-3xl p-5 sm:p-6 max-w-lg w-full border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 animate-scale-in my-auto"
+            className="bg-white dark:bg-slate-800 rounded-none p-5 sm:p-6 max-w-lg w-full border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 animate-scale-in my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 flex items-center justify-center text-amber-500">
+                <div className="w-10 h-10 rounded-none bg-amber-500/15 flex items-center justify-center text-amber-500">
                   <Sliders className="w-5 h-5" />
                 </div>
                 <div>
@@ -4237,7 +3768,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
             </div>
 
             {/* Batch summary card */}
-            <div className="bg-slate-50 dark:bg-slate-900/70 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+            <div className="bg-slate-50 dark:bg-slate-900/70 p-3.5 rounded-none border border-slate-200 dark:border-slate-700 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-slate-600 dark:text-slate-400">
                   {language === 'lo' ? 'ຍອດຮັບເງິນໃນຊຸດນີ້:' : 'Total Inflow in Batch:'}
@@ -4586,21 +4117,62 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                               {language === 'lo' ? 'ຍັງບໍ່ມີເລກບັນຊີ' : 'No account number set'}
                             </p>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => setViewingMemberQr(selectedMember)}
-                            className="text-[10px] font-black text-purple-600 dark:text-purple-400 hover:underline inline-flex items-center gap-1 mt-0.5 cursor-pointer"
-                          >
-                            <Eye className="w-2.5 h-2.5" />
-                            <span>{language === 'lo' ? 'ເບິ່ງຄິວອາຂະໜາດເຕັມເພື່ອສະແກນ' : 'View Full QR to Scan'}</span>
-                          </button>
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => setViewingMemberQr(selectedMember)}
+                              className="text-[10px] font-black text-purple-600 dark:text-purple-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eye className="w-2.5 h-2.5" />
+                              <span>{language === 'lo' ? 'ເບິ່ງຄິວອາຂະໜາດເຕັມ' : 'View Full QR'}</span>
+                            </button>
+                            <span className="text-slate-300 dark:text-slate-600">•</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMemberQr({
+                                  id: selectedMember.id,
+                                  name: selectedMember.name,
+                                  imageUrl: selectedMember.imageUrl,
+                                  financeQrUrl: selectedMember.financeQrUrl || '',
+                                  bankName: selectedMember.bankName || 'BCEL One',
+                                  bankAccountNumber: selectedMember.bankAccountNumber || '',
+                                  bankAccountName: selectedMember.bankAccountName || selectedMember.name || '',
+                                });
+                                setIsTeamQrManagerOpen(true);
+                              }}
+                              className="text-[10px] font-bold text-slate-500 hover:text-purple-600 dark:hover:text-purple-300 hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <Edit2 className="w-2.5 h-2.5" />
+                              <span>{language === 'lo' ? 'ແກ້ໄຂ QR' : 'Edit QR'}</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-dashed border-purple-300 dark:border-purple-800 text-center">
+                      <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-dashed border-purple-300 dark:border-purple-800 text-center space-y-1.5">
                         <div className="text-[11px] text-slate-500">
-                          {language === 'lo' ? 'ຍັງບໍ່ທັນມີຮູບ QR ຮັບເງິນ (ສາມາດເພີ່ມໄດ້ໃນຫ້ອງຕັ້ງຄ່າ)' : 'No transfer QR code uploaded yet (manage in Settings)'}
+                          {language === 'lo' ? 'ຍັງບໍ່ທັນມີຮູບ QR ຮັບເງິນ' : 'No transfer QR code uploaded yet'}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingMemberQr({
+                              id: selectedMember.id,
+                              name: selectedMember.name,
+                              imageUrl: selectedMember.imageUrl,
+                              financeQrUrl: '',
+                              bankName: selectedMember.bankName || 'BCEL One',
+                              bankAccountNumber: selectedMember.bankAccountNumber || '',
+                              bankAccountName: selectedMember.bankAccountName || selectedMember.name || '',
+                            });
+                            setIsTeamQrManagerOpen(true);
+                          }}
+                          className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-[10px] font-bold shadow inline-flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <QrCode className="w-3 h-3" />
+                          <span>{language === 'lo' ? '+ ຕັ້ງຄ່າ / ເພີ່ມຮູບ QR ໃຫ້ລູກທີມຄົນນີ້' : '+ Set / Add QR for Member'}</span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -5246,7 +4818,12 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      handleDeleteBatch(editingBatchTarget.batchId, editingBatchTarget.batchName, editingBatchTarget.items?.length || 0);
+                      handleDeleteBatch(
+                        editingBatchTarget.batchId,
+                        editingBatchTarget.batchName,
+                        editingBatchTarget.items?.length || 0,
+                        (editingBatchTarget.items || []).map((it: any) => it.id)
+                      );
                       setIsEditBatchModalOpen(false);
                     }}
                     className="px-3 py-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl font-bold transition flex items-center gap-1"
@@ -5471,41 +5048,43 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                     <p className="text-xs text-slate-500 font-medium">
                       {language === 'lo' ? 'ຍັງບໍ່ມີຮູບສະລິບການໂອນສຳລັບລາຍການນີ້' : 'No transfer slip attached to this record'}
                     </p>
-                    <button
-                      onClick={() => {
-                        const distToEdit = selectedDistDetail;
-                        setSelectedDistDetail(null);
-                        if (distToEdit.category === 'emergency') {
-                          setEditingEmergency(distToEdit);
-                          setEmBatchId(distToEdit.batchId || '');
-                          setEmBatchName(distToEdit.batchName || (language === 'lo' ? 'ສຸກເສິນ ງວດ 1' : 'Emergency #1'));
-                          setEmRecipient(distToEdit.recipientName);
-                          setEmAmount(String(distToEdit.amount));
-                          setEmDate(distToEdit.transferDate || new Date().toISOString().split('T')[0]);
-                          setEmTime(distToEdit.transferTime || '12:00');
-                          setEmEvidence(distToEdit.evidenceUrl || '');
-                          setEmStatus(distToEdit.status);
-                          setEmNotes(distToEdit.notes || '');
-                          setIsAddEmergencyOpen(true);
-                        } else {
-                          setEditingDist(distToEdit);
-                          setDistBatchId(distToEdit.batchId || '');
-                          setDistBatchName(distToEdit.batchName || (language === 'lo' ? 'ງວດທີ 1' : 'Batch #1'));
-                          setDistRecipient(distToEdit.recipientName);
-                          setDistAmount(String(distToEdit.amount));
-                          setDistDate(distToEdit.transferDate || new Date().toISOString().split('T')[0]);
-                          setDistTime(distToEdit.transferTime || '12:00');
-                          setDistEvidence(distToEdit.evidenceUrl || '');
-                          setDistStatus(distToEdit.status);
-                          setDistNotes(distToEdit.notes || '');
-                          setIsAddDistOpen(true);
-                        }
-                      }}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow inline-flex items-center gap-1.5"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>{language === 'lo' ? 'ອັບໂຫຼດສະລິບດຽວນີ້' : 'Upload Slip Now'}</span>
-                    </button>
+                    {!isReadOnly && (
+                      <button
+                        onClick={() => {
+                          const distToEdit = selectedDistDetail;
+                          setSelectedDistDetail(null);
+                          if (distToEdit.category === 'emergency') {
+                            setEditingEmergency(distToEdit);
+                            setEmBatchId(distToEdit.batchId || '');
+                            setEmBatchName(distToEdit.batchName || (language === 'lo' ? 'ສຸກເສິນ ງວດ 1' : 'Emergency #1'));
+                            setEmRecipient(distToEdit.recipientName);
+                            setEmAmount(String(distToEdit.amount));
+                            setEmDate(distToEdit.transferDate || new Date().toISOString().split('T')[0]);
+                            setEmTime(distToEdit.transferTime || '12:00');
+                            setEmEvidence(distToEdit.evidenceUrl || '');
+                            setEmStatus(distToEdit.status);
+                            setEmNotes(distToEdit.notes || '');
+                            setIsAddEmergencyOpen(true);
+                          } else {
+                            setEditingDist(distToEdit);
+                            setDistBatchId(distToEdit.batchId || '');
+                            setDistBatchName(distToEdit.batchName || (language === 'lo' ? 'ງວດທີ 1' : 'Batch #1'));
+                            setDistRecipient(distToEdit.recipientName);
+                            setDistAmount(String(distToEdit.amount));
+                            setDistDate(distToEdit.transferDate || new Date().toISOString().split('T')[0]);
+                            setDistTime(distToEdit.transferTime || '12:00');
+                            setDistEvidence(distToEdit.evidenceUrl || '');
+                            setDistStatus(distToEdit.status);
+                            setDistNotes(distToEdit.notes || '');
+                            setIsAddDistOpen(true);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{language === 'lo' ? 'ອັບໂຫຼດສະລິບດຽວນີ້' : 'Upload Slip Now'}</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -5711,7 +5290,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : !isReadOnly ? (
               <div className="text-center pt-1">
                 <button
                   type="button"
@@ -5734,7 +5313,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                   {language === 'lo' ? '+ ເພີ່ມເລກບັນຊີສຳລັບຄິວອານີ້' : '+ Add account number for this QR'}
                 </button>
               </div>
-            )}
+            ) : null}
 
             {/* Simple Close Button */}
             <div className="pt-1">
@@ -6083,7 +5662,7 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                     <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
                       {language === 'lo' ? `ລາຍຊື່ຄິວອາ (${qrMembers.length} ລາຍການ)` : `QR Accounts (${qrMembers.length})`}
                     </span>
-                    {!editingMemberQr && (
+                    {!editingMemberQr && !isReadOnly && (
                       <button
                         type="button"
                         onClick={() =>
@@ -6177,35 +5756,39 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                             </div>
                           )}
 
-                          {/* Edit Button */}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setEditingMemberQr({
-                                id: m.id,
-                                name: m.name || '',
-                                imageUrl: m.imageUrl || '',
-                                financeQrUrl: m.financeQrUrl || '',
-                                bankName: m.bankName || 'BCEL One',
-                                bankAccountNumber: m.bankAccountNumber || '',
-                                bankAccountName: m.bankAccountName || m.name || '',
-                              })
-                            }
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-purple-100 text-slate-700 hover:text-purple-700 dark:bg-slate-800 dark:hover:bg-purple-900/60 dark:text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-300 dark:border-slate-700 cursor-pointer"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            <span>{language === 'lo' ? 'ແກ້ໄຂ' : 'Edit'}</span>
-                          </button>
+                          {/* Edit & Delete Buttons */}
+                          {!isReadOnly && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingMemberQr({
+                                    id: m.id,
+                                    name: m.name || '',
+                                    imageUrl: m.imageUrl || '',
+                                    financeQrUrl: m.financeQrUrl || '',
+                                    bankName: m.bankName || 'BCEL One',
+                                    bankAccountNumber: m.bankAccountNumber || '',
+                                    bankAccountName: m.bankAccountName || m.name || '',
+                                  })
+                                }
+                                className="px-3 py-1.5 bg-slate-100 hover:bg-purple-100 text-slate-700 hover:text-purple-700 dark:bg-slate-800 dark:hover:bg-purple-900/60 dark:text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-300 dark:border-slate-700 cursor-pointer"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                                <span>{language === 'lo' ? 'ແກ້ໄຂ' : 'Edit'}</span>
+                              </button>
 
-                          {/* Delete Button */}
-                          <button
-                            type="button"
-                            onClick={() => setMemberToDelete(m)}
-                            className="p-2 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/50 dark:hover:bg-red-900/50 dark:text-red-400 rounded-xl transition border border-red-200 dark:border-red-900/50 cursor-pointer"
-                            title={language === 'lo' ? 'ລຶບ' : 'Delete'}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                              {/* Delete Button */}
+                              <button
+                                type="button"
+                                onClick={() => setMemberToDelete(m)}
+                                className="p-2 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/50 dark:hover:bg-red-900/50 dark:text-red-400 rounded-xl transition border border-red-200 dark:border-red-900/50 cursor-pointer"
+                                title={language === 'lo' ? 'ລຶບ' : 'Delete'}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     ))
@@ -6308,6 +5891,105 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 {isDeletingMember ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>{language === 'lo' ? 'ຢືນຢັນລຶບ' : 'Yes, Delete'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* FINANCIAL RECORD GENERAL DELETE CONFIRMATION POPUP MODAL                  */}
+      {/* ========================================================================= */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in"
+          onClick={() => {
+            if (!isDeletingTarget) setDeleteTarget(null);
+          }}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 border-2 border-red-500/50 shadow-2xl space-y-4 text-center animate-scale-in my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 mx-auto flex items-center justify-center border-2 border-red-300 dark:border-red-800 shadow">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h4 className="text-base font-black text-slate-900 dark:text-white">
+                {deleteTarget.type === 'inflow'
+                  ? language === 'lo'
+                    ? 'ຢືນຢັນການລຶບລາຍການເງິນສະໜັບສະໜູນ'
+                    : 'Confirm Delete Inflow Record'
+                  : deleteTarget.type === 'emergency_dist'
+                  ? language === 'lo'
+                    ? 'ຢືນຢັນການລຶບລາຍການໂອນສຸກເສິນ'
+                    : 'Confirm Delete Emergency Record'
+                  : deleteTarget.type === 'team_dist'
+                  ? language === 'lo'
+                    ? 'ຢືນຢັນການລຶບການໂອນໃຫ້ທີມ'
+                    : 'Confirm Delete Team Transfer'
+                  : deleteTarget.type === 'batch'
+                  ? language === 'lo'
+                    ? 'ຢືນຢັນການລຶບຊຸດການໂອນທັງໝົດ'
+                    : 'Confirm Delete Entire Batch'
+                  : language === 'lo'
+                  ? 'ຢືນຢັນການຕັດລາຍຊື່ອອກຈາກຊຸດ'
+                  : 'Confirm Remove from Batch'}
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {language === 'lo'
+                  ? 'ທ່ານແນ່ໃຈບໍ່ວ່າຕ້ອງການລຶບລາຍການນີ້ອອກຈາກລະບົບ? ການກະທຳນີ້ບໍ່ສາມາດກູ້ຄືນໄດ້.'
+                  : 'Are you sure you want to delete this record? This action cannot be undone.'}
+              </p>
+            </div>
+
+            <div className="p-3 bg-red-50/60 dark:bg-red-950/30 rounded-2xl border border-red-200 dark:border-red-900/50 space-y-1 text-left">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                  {deleteTarget.title}
+                </span>
+                {deleteTarget.amount !== undefined && (
+                  <span className="text-sm font-black text-rose-600 dark:text-rose-400 font-mono shrink-0">
+                    {deleteTarget.amount.toLocaleString()} {currency}
+                  </span>
+                )}
+              </div>
+              {deleteTarget.subtitle && (
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  {deleteTarget.subtitle}
+                </div>
+              )}
+              {deleteTarget.batchCount !== undefined && (
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {language === 'lo'
+                    ? `ລວມທັງໝົດ ${deleteTarget.batchCount} ລາຍການໃນຊຸດນີ້`
+                    : `Contains ${deleteTarget.batchCount} items in this batch`}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingTarget}
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                {language === 'lo' ? 'ຍົກເລີກ' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingTarget}
+                onClick={confirmDeleteTarget}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingTarget ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <Trash2 className="w-4 h-4" />

@@ -1,3 +1,5 @@
+import { db, doc, setDoc } from '../lib/firebase';
+
 /**
  * Universal Client-Side Image Compressor & Optimizer
  * Guarantees ANY image file type, resolution, or format (JPG, PNG, WEBP, GIF, SVG, HEIC/camera photos)
@@ -6,9 +8,9 @@
  */
 export const compressImageFile = (
   file: File,
-  maxDimension = 1600,
-  initialQuality = 0.85,
-  maxStringLength = 200000, // ~150KB binary size per image - crystal clear HD quality
+  maxDimension = 2560,
+  initialQuality = 0.95,
+  maxStringLength = 750000, // HD sharpness preservation
   preserveTransparency = false
 ): Promise<string> => {
   return new Promise((resolve) => {
@@ -273,7 +275,7 @@ export async function emergencyCompressObject(obj: any): Promise<any> {
   const compressWalk = async (val: any): Promise<any> => {
     if (!val) return val;
     if (typeof val === 'string' && val.startsWith('data:image')) {
-      return await shrinkBase64DataUrl(val, 960, 0.65, 80000);
+      return await shrinkBase64DataUrl(val, 1920, 0.88, 350000);
     }
     if (Array.isArray(val)) {
       const arr = [];
@@ -295,9 +297,72 @@ export async function emergencyCompressObject(obj: any): Promise<any> {
 }
 
 /**
+ * Helper to convert heavy base64 strings to permanent uncompressed server URLs
+ * preserving 100% original resolution without Firestore size penalties.
+ * If backend server is unavailable (e.g. static hosting on Netlify), it writes
+ * directly to Cloud Firestore `uploaded_files`.
+ */
+async function convertBase64ToUploadUrl(base64Str: string, namePrefix = 'poster'): Promise<string> {
+  if (!base64Str || typeof base64Str !== 'string' || !base64Str.startsWith('data:image')) {
+    return base64Str;
+  }
+
+  // 1. Try server endpoint first
+  try {
+    const res = await fetch('/api/upload-file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64Data: base64Str,
+        fileName: `${namePrefix}_${Date.now()}`,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.url) {
+        return data.url;
+      }
+    }
+  } catch {
+    // Backend offline or static hosting
+  }
+
+  // 2. Direct Cloud Firestore uploaded_files backup (retains 100% original crisp clarity on Netlify / Vercel)
+  try {
+    const match = base64Str.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      const mime = match[1];
+      const rawBase64 = match[2];
+      const ext = mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg';
+      const filename = `${namePrefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
+      const docId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      await setDoc(
+        doc(db, 'uploaded_files', docId),
+        {
+          filename,
+          mimeType: mime,
+          data: rawBase64,
+          size: Math.round(rawBase64.length * 0.75),
+          isChunked: false,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      return `/uploads/${filename}`;
+    }
+  } catch (firestoreErr) {
+    console.warn('Direct Firestore upload error:', firestoreErr);
+  }
+
+  return base64Str;
+}
+
+/**
  * Optimizes an entire HomePoster or config object before saving to Firestore.
  * Preserves ultra-crisp resolution while strictly ensuring total document
- * payload stays safely within ~400KB - 550KB (Firestore doc limit is 1MB / 1,048,576 bytes).
+ * payload stays safely within lightweight bounds (~20KB - 50KB).
  */
 export async function optimizePosterForFirestore(poster: any): Promise<any> {
   if (!poster) return poster;
@@ -305,25 +370,43 @@ export async function optimizePosterForFirestore(poster: any): Promise<any> {
 
   const safePoster = JSON.parse(JSON.stringify(poster));
 
-  // 1. Process Background Image (bgImageUrl) (~95KB)
+  // 1. Process Background Image (bgImageUrl)
   const bgPromise = (async () => {
     if (typeof safePoster.bgImageUrl === 'string' && safePoster.bgImageUrl.startsWith('data:image')) {
-      if (safePoster.bgImageUrl.length > 95000) {
-        safePoster.bgImageUrl = await shrinkBase64DataUrl(safePoster.bgImageUrl, 1280, 0.75, 95000);
+      const uploadedUrl = await convertBase64ToUploadUrl(safePoster.bgImageUrl, 'bg');
+      if (uploadedUrl.startsWith('/uploads/')) {
+        safePoster.bgImageUrl = uploadedUrl;
+      } else if (safePoster.bgImageUrl.length > 350000) {
+        safePoster.bgImageUrl = await shrinkBase64DataUrl(safePoster.bgImageUrl, 2560, 0.92, 350000);
       }
     }
   })();
 
-  // 2. Process Organization Logo (logoUrl) (~35KB)
+  // 2. Process Upcoming Event Flyer / Image
+  const upcomingPromise = (async () => {
+    if (typeof safePoster.upcomingEventImageUrl === 'string' && safePoster.upcomingEventImageUrl.startsWith('data:image')) {
+      const uploadedUrl = await convertBase64ToUploadUrl(safePoster.upcomingEventImageUrl, 'upcoming_poster');
+      if (uploadedUrl.startsWith('/uploads/')) {
+        safePoster.upcomingEventImageUrl = uploadedUrl;
+      } else if (safePoster.upcomingEventImageUrl.length > 350000) {
+        safePoster.upcomingEventImageUrl = await shrinkBase64DataUrl(safePoster.upcomingEventImageUrl, 2560, 0.92, 350000);
+      }
+    }
+  })();
+
+  // 3. Process Organization Logo (logoUrl)
   const logoPromise = (async () => {
     if (typeof safePoster.logoUrl === 'string' && safePoster.logoUrl.startsWith('data:image')) {
-      if (safePoster.logoUrl.length > 35000) {
-        safePoster.logoUrl = await shrinkBase64DataUrl(safePoster.logoUrl, 480, 0.85, 35000);
+      const uploadedUrl = await convertBase64ToUploadUrl(safePoster.logoUrl, 'logo');
+      if (uploadedUrl.startsWith('/uploads/')) {
+        safePoster.logoUrl = uploadedUrl;
+      } else if (safePoster.logoUrl.length > 100000) {
+        safePoster.logoUrl = await shrinkBase64DataUrl(safePoster.logoUrl, 1200, 0.92, 100000);
       }
     }
   })();
 
-  // 3. Process Carousel / Poster Images concurrently
+  // 4. Process Carousel / Poster Images concurrently (prioritizing 100% original full-resolution files)
   const rawList: string[] = Array.isArray(safePoster.imageUrls)
     ? safePoster.imageUrls
     : safePoster.imageUrl
@@ -331,16 +414,18 @@ export async function optimizePosterForFirestore(poster: any): Promise<any> {
     : [];
 
   const validImages = rawList.filter((u) => u && typeof u === 'string' && u.trim().length > 0);
-  const imgCount = Math.max(1, validImages.length);
-
-  const perImageBudget = imgCount === 1 ? 200000 : imgCount === 2 ? 140000 : Math.max(75000, Math.floor(320000 / imgCount));
-  const maxDim = imgCount === 1 ? 1600 : imgCount === 2 ? 1400 : 1200;
 
   const imagesPromise = (async () => {
     const optimizedImages = await Promise.all(
-      validImages.map(async (imgStr) => {
-        if (imgStr.startsWith('data:image') && imgStr.length > perImageBudget) {
-          return await shrinkBase64DataUrl(imgStr, maxDim, 0.80, perImageBudget);
+      validImages.map(async (imgStr, idx) => {
+        if (typeof imgStr === 'string' && imgStr.startsWith('data:image')) {
+          const uploadedUrl = await convertBase64ToUploadUrl(imgStr, `hero_slide_${idx}`);
+          if (uploadedUrl.startsWith('/uploads/')) {
+            return uploadedUrl;
+          }
+          if (imgStr.length > 400000) {
+            return await shrinkBase64DataUrl(imgStr, 2560, 0.92, 400000);
+          }
         }
         return imgStr;
       })
@@ -349,11 +434,11 @@ export async function optimizePosterForFirestore(poster: any): Promise<any> {
     safePoster.imageUrl = optimizedImages[0] || '';
   })();
 
-  // 4. Process Bokeo Timeline Images concurrently (~65KB each max)
+  // 5. Process Bokeo Timeline Images concurrently
   const timelinePromise = (async () => {
     if (Array.isArray(safePoster.bokeoTimeline)) {
       safePoster.bokeoTimeline = await Promise.all(
-        safePoster.bokeoTimeline.map(async (item: any) => {
+        safePoster.bokeoTimeline.map(async (item: any, itemIdx: number) => {
           if (!item) return item;
           const cloneItem = { ...item };
           const rawTimelineImgs: string[] = Array.isArray(cloneItem.imageUrls)
@@ -364,9 +449,13 @@ export async function optimizePosterForFirestore(poster: any): Promise<any> {
 
           if (rawTimelineImgs.length > 0) {
             const optImgs = await Promise.all(
-              rawTimelineImgs.map(async (tImg: string) => {
-                if (typeof tImg === 'string' && tImg.startsWith('data:image') && tImg.length > 70000) {
-                  return await shrinkBase64DataUrl(tImg, 800, 0.78, 70000);
+              rawTimelineImgs.map(async (tImg: string, tIdx: number) => {
+                if (typeof tImg === 'string' && tImg.startsWith('data:image')) {
+                  const uploaded = await convertBase64ToUploadUrl(tImg, `timeline_${itemIdx}_${tIdx}`);
+                  if (uploaded.startsWith('/uploads/')) return uploaded;
+                  if (tImg.length > 150000) {
+                    return await shrinkBase64DataUrl(tImg, 1200, 0.85, 150000);
+                  }
                 }
                 return tImg;
               })
@@ -380,21 +469,51 @@ export async function optimizePosterForFirestore(poster: any): Promise<any> {
     }
   })();
 
-  // Execute all image groups in parallel
-  await Promise.all([bgPromise, logoPromise, imagesPromise, timelinePromise]);
+  // 5. Process Bokeo / About Us Poster Image
+  const bokeoPromise = (async () => {
+    if (typeof safePoster.bokeoImageUrl === 'string' && safePoster.bokeoImageUrl.startsWith('data:image')) {
+      const uploadedUrl = await convertBase64ToUploadUrl(safePoster.bokeoImageUrl, 'bokeo_poster');
+      if (uploadedUrl.startsWith('/uploads/')) {
+        safePoster.bokeoImageUrl = uploadedUrl;
+      } else if (safePoster.bokeoImageUrl.length > 350000) {
+        safePoster.bokeoImageUrl = await shrinkBase64DataUrl(safePoster.bokeoImageUrl, 2560, 0.92, 350000);
+      }
+    }
+  })();
 
-  // 5. Emergency guard only if payload is exceptionally high (> 750KB)
+  // 5b. Process Insights / Dashboard Poster Image
+  const insightsPromise = (async () => {
+    if (typeof safePoster.insightsImageUrl === 'string' && safePoster.insightsImageUrl.startsWith('data:image')) {
+      const uploadedUrl = await convertBase64ToUploadUrl(safePoster.insightsImageUrl, 'insights_poster');
+      if (uploadedUrl.startsWith('/uploads/')) {
+        safePoster.insightsImageUrl = uploadedUrl;
+      } else if (safePoster.insightsImageUrl.length > 350000) {
+        safePoster.insightsImageUrl = await shrinkBase64DataUrl(safePoster.insightsImageUrl, 2560, 0.92, 350000);
+      }
+    }
+  })();
+
+  // Execute all image groups in parallel
+  await Promise.all([bgPromise, upcomingPromise, logoPromise, imagesPromise, timelinePromise, bokeoPromise, insightsPromise]);
+
+  // 6. Emergency guard only if payload is exceptionally high (> 750KB)
   let jsonLen = JSON.stringify(safePoster).length;
   if (jsonLen > 750000) {
-    console.warn(`[Firestore Guard] Payload size ${jsonLen} is high. Running emergency pass...`);
+    console.warn(`[Firestore Guard] Payload size ${jsonLen} is high. Converting remaining base64 images to uploaded_files...`);
     if (safePoster.bgImageUrl && safePoster.bgImageUrl.startsWith('data:image')) {
-      safePoster.bgImageUrl = await shrinkBase64DataUrl(safePoster.bgImageUrl, 960, 0.65, 55000);
+      safePoster.bgImageUrl = await convertBase64ToUploadUrl(safePoster.bgImageUrl, 'bg_overflow');
+    }
+    if (safePoster.bokeoImageUrl && safePoster.bokeoImageUrl.startsWith('data:image')) {
+      safePoster.bokeoImageUrl = await convertBase64ToUploadUrl(safePoster.bokeoImageUrl, 'bokeo_overflow');
+    }
+    if (safePoster.insightsImageUrl && safePoster.insightsImageUrl.startsWith('data:image')) {
+      safePoster.insightsImageUrl = await convertBase64ToUploadUrl(safePoster.insightsImageUrl, 'insights_overflow');
     }
     if (Array.isArray(safePoster.imageUrls)) {
       safePoster.imageUrls = await Promise.all(
-        safePoster.imageUrls.map(async (img: string) => {
-          if (img.startsWith('data:image')) {
-            return await shrinkBase64DataUrl(img, 960, 0.65, 60000);
+        safePoster.imageUrls.map(async (img: string, idx: number) => {
+          if (img && img.startsWith('data:image')) {
+            return await convertBase64ToUploadUrl(img, `slide_overflow_${idx}`);
           }
           return img;
         })

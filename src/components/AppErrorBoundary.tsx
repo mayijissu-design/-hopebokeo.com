@@ -1,5 +1,5 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import React, { Component, ErrorInfo, ReactNode } from "react";
+import { AlertTriangle, RotateCw, RefreshCw } from "lucide-react";
 
 interface Props {
   children: ReactNode;
@@ -11,61 +11,70 @@ interface State {
 }
 
 export class AppErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
-
-  public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('App Uncaught Error:', error, errorInfo);
+  static getDerivedStateFromError(error: Error): State {
+    return {
+      hasError: true,
+      error,
+    };
   }
 
-  private handleReset = () => {
-    this.setState({ hasError: false, error: null });
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("AppErrorBoundary caught error:", error, errorInfo);
+  }
+
+  handleReload = () => {
     window.location.reload();
   };
 
-  private handleClearCacheAndReload = () => {
+  handleResetAndReload = () => {
     try {
-      localStorage.removeItem('hb_cached_events');
-      localStorage.removeItem('hb_cached_villages');
-      localStorage.removeItem('hb_cached_teams');
+      localStorage.clear();
+      sessionStorage.clear();
     } catch {}
-    window.location.reload();
+    window.location.href = "/";
   };
 
-  public render() {
+  render() {
     if (this.state.hasError) {
+      const errorMessage = this.state.error?.message || "Unknown runtime error";
+
       return (
-        <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center space-y-6">
-            <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-center mx-auto text-red-400">
+        <div className="min-h-screen w-full bg-[#0a0f1d] flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#131c31] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center">
+            {/* Warning Icon Badge */}
+            <div className="w-16 h-16 rounded-2xl bg-red-950/40 border border-red-800/50 flex items-center justify-center text-red-500 mb-5 shadow-inner">
               <AlertTriangle className="w-8 h-8" />
             </div>
 
-            <div className="space-y-2">
-              <h1 className="text-xl font-bold text-white">
-                ເກີດຂໍ້ຜິດພາດໃນລະບົບ (An error occurred)
-              </h1>
-              <p className="text-sm text-slate-400 leading-relaxed">
-                ລະບົບກຳລັງປົກປ້ອງຂໍ້ມູນຂອງທ່ານ. ທ່ານສາມາດກົດໂຫຼດຄືນໃໝ່ເພື່ອສືບຕໍ່ໃຊ້ງານ.
-              </p>
-              {this.state.error?.message && (
-                <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-xs text-slate-400 font-mono text-left break-words max-h-32 overflow-y-auto">
-                  {this.state.error.message}
-                </div>
-              )}
+            {/* Title */}
+            <h2 className="text-xl sm:text-2xl font-bold text-white mb-2">
+              ເກີດຂໍ້ຜິດພາດໃນລະບົບ (An error occurred)
+            </h2>
+
+            {/* Description */}
+            <p className="text-sm text-slate-300 leading-relaxed mb-4">
+              ລະບົບກຳລັງປົກປ້ອງຂໍ້ມູນຂອງທ່ານ. ທ່ານສາມາດກົດໂຫຼດຄືນໃໝ່ເພື່ອສືບຕໍ່ໃຊ້ງານ.
+            </p>
+
+            {/* Error Message Box */}
+            <div className="w-full bg-[#0d1424] border border-slate-800 rounded-xl px-4 py-3 text-left mb-6 font-mono text-xs text-slate-300 overflow-x-auto select-all">
+              {errorMessage}
             </div>
 
-            <div className="flex flex-col gap-3 pt-2">
+            {/* Actions */}
+            <div className="w-full flex flex-col gap-3">
               <button
                 type="button"
-                onClick={this.handleReset}
-                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition active:scale-98 cursor-pointer"
+                onClick={this.handleReload}
+                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-98 transition font-semibold text-white shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2 cursor-pointer text-sm"
               >
                 <RefreshCw className="w-4 h-4" />
                 <span>ໂຫຼດໜ້າຄືນໃໝ່ (Reload Page)</span>
@@ -73,10 +82,10 @@ export class AppErrorBoundary extends Component<Props, State> {
 
               <button
                 type="button"
-                onClick={this.handleClearCacheAndReload}
-                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl font-medium text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                onClick={this.handleResetAndReload}
+                className="w-full py-3 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-700 active:scale-98 transition font-medium text-slate-300 hover:text-white border border-slate-700/60 flex items-center justify-center gap-2 cursor-pointer text-sm"
               >
-                <Home className="w-3.5 h-3.5" />
+                <RotateCw className="w-4 h-4" />
                 <span>ລ້າງແຄຊ ແລະ ເຂົ້າສູ່ລະບົບໃໝ່ (Reset & Reload)</span>
               </button>
             </div>

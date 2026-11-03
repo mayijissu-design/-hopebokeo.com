@@ -1,5 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BarChart,
   Bar,
@@ -63,14 +62,9 @@ const COLORS = ['#cc0000', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'
 
 const AnimatedCounter: React.FC<{ value: number }> = ({ value }) => {
   return (
-    <motion.span
-      key={value}
-      initial={{ opacity: 0, y: 10, scale: 0.9 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
-    >
+    <span key={value} className="inline-block transition-all duration-300">
       {value.toLocaleString()}
-    </motion.span>
+    </span>
   );
 };
 
@@ -95,8 +89,69 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const [showCharts, setShowCharts] = useState(true);
   const [showChartFilters, setShowChartFilters] = useState(true);
   const [showUrgent, setShowUrgent] = useState(true);
-  const [showFullTable, setShowFullTable] = useState(true);
   const [showMapSection, setShowMapSection] = useState(true);
+  const [showFullTable, setShowFullTable] = useState(true);
+
+  // Auto-expand and smoothly scroll to Area & Map section when navigated from "View All Locations" button
+  useEffect(() => {
+    let scrollTimer: any = null;
+    let attempts = 0;
+    const maxAttempts = 18;
+
+    const performScrollToMap = () => {
+      setShowMapSection(true);
+      attempts = 0;
+      if (scrollTimer) clearInterval(scrollTimer);
+
+      const checkAndScroll = () => {
+        attempts++;
+        const el = document.getElementById('dashboard-area-map-section');
+        if (el) {
+          const navOffset = 70; // Offset to clear sticky top header
+          const targetY = Math.max(0, el.getBoundingClientRect().top + window.pageYOffset - navOffset);
+          window.scrollTo({
+            top: targetY,
+            behavior: attempts <= 2 ? 'auto' : 'smooth',
+          });
+
+          // Once it has aligned accurately after layout settles
+          if (attempts >= 6) {
+            clearInterval(scrollTimer);
+            scrollTimer = null;
+            try {
+              sessionStorage.removeItem('hb_scroll_target');
+            } catch {}
+          }
+        } else if (attempts >= maxAttempts) {
+          clearInterval(scrollTimer);
+          scrollTimer = null;
+          try {
+            sessionStorage.removeItem('hb_scroll_target');
+          } catch {}
+        }
+      };
+
+      checkAndScroll();
+      scrollTimer = setInterval(checkAndScroll, 60);
+    };
+
+    // Check if target was queued in sessionStorage
+    try {
+      if (sessionStorage.getItem('hb_scroll_target') === 'dashboard-area-map-section') {
+        performScrollToMap();
+      }
+    } catch {}
+
+    const handleExpandMap = () => {
+      performScrollToMap();
+    };
+
+    window.addEventListener('hb_expand_dashboard_map', handleExpandMap);
+    return () => {
+      if (scrollTimer) clearInterval(scrollTimer);
+      window.removeEventListener('hb_expand_dashboard_map', handleExpandMap);
+    };
+  }, []);
 
   // Table District & Status Quick Sub-Filters
   const [selectedDistrictFilter, setSelectedDistrictFilter] = useState('all');
@@ -504,17 +559,16 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   };
 
   return (
-    <div className="space-y-2.5 sm:space-y-4 animate-fade-in pb-10">
-      {/* Quick Stats Summary Card (Matching Applied Filters) */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-2 sm:p-3 md:p-4 rounded-none border border-slate-700 shadow-sm relative overflow-hidden space-y-2.5">
-        <div className="absolute top-0 right-0 -mt-4 -mr-4 w-32 h-32 bg-[#cc0000]/10 rounded-none blur-2xl pointer-events-none" />
-        <div className="relative z-10 flex items-center justify-between gap-4 border-b border-slate-700/60 pb-3">
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 bg-[#cc0000] text-white rounded-none shadow-xs">
-              <Filter className="w-4 h-4" />
-            </span>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 space-y-6 sm:space-y-8 animate-fade-in pb-12">
+      {/* Quick Stats Summary Card */}
+      <div className="bg-[#0f172a] text-white p-4 sm:p-5 md:p-6 rounded-2xl shadow-md relative overflow-hidden space-y-4 transition-colors">
+        <div className="relative z-10 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#cc0000] text-white flex items-center justify-center font-bold shadow-xs">
+              <Activity className="w-4 h-4" />
+            </div>
             <div>
-              <h2 className="font-extrabold text-sm sm:text-base tracking-wide text-white">
+              <h2 className="font-black text-base sm:text-lg tracking-tight text-white">
                 {language === 'lo'
                   ? 'ສະຫຼຸບສະຖິຕິ'
                   : language === 'th'
@@ -522,7 +576,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   : 'Summary Statistics'}
               </h2>
               {isDateFiltered && (
-                <span className="text-[10px] text-amber-400 font-bold block">
+                <span className="text-[11px] text-amber-400 font-bold block mt-0.5">
                   {language === 'lo'
                     ? `📅 ຕົວເລກເພີ່ມຂຶ້ນໃນຊ່ວງວັນທີ: ${startDate || '...'} ຫາ ${endDate || '...'}`
                     : `📅 Metrics added in period: ${startDate || '...'} to ${endDate || '...'}`}
@@ -533,11 +587,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
           <button
             onClick={() => setShowStats(!showStats)}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-none border border-slate-700 transition flex items-center justify-center shrink-0"
+            className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-2xs active:scale-95 border border-slate-700"
             title={showStats ? (language === 'lo' ? 'ເຊື່ອງສະຖິຕິ' : 'Collapse') : (language === 'lo' ? 'ສະແດງສະຖິຕິ' : 'Expand')}
           >
             {showStats ? (
-              <ChevronUp className="w-4 h-4 text-amber-400" />
+              <ChevronUp className="w-4 h-4 text-red-400" />
             ) : (
               <ChevronDown className="w-4 h-4 text-emerald-400" />
             )}
@@ -546,13 +600,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
         {showStats && (
           <div className="relative z-10 animate-fade-in">
-            {/* 2 rows with 3 items per row on mobile (grid-cols-3) */}
-            <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2.5">
+            {/* 6 Metric Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
               {/* Active Churches / Villages */}
-              <div className="bg-slate-800/80 border border-slate-700/80 p-1.5 sm:p-3 rounded-none flex flex-col items-center justify-center text-center">
-                <div className="flex items-center gap-1 text-blue-400 text-[9px] sm:text-[11px] font-bold mb-0.5 whitespace-nowrap">
-                  <Building2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                  <span>
+              <div className="bg-[#16274c] hover:bg-[#1b305c] border border-[#233b6e] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
+                <div className="flex items-center justify-center gap-1.5 text-blue-400 text-xs font-bold mb-1">
+                  <Building2 className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
                     {language === 'lo'
                       ? 'ຄິດສະຈັກ/ບ້ານ'
                       : language === 'th'
@@ -560,16 +614,16 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : 'Churches'}
                   </span>
                 </div>
-                <span className="text-base sm:text-2xl font-black text-white">
+                <span className="text-xl sm:text-2xl font-black text-white tracking-tight tabular-nums">
                   <AnimatedCounter value={filteredVillages.length} />
                 </span>
               </div>
 
               {/* Heard Gospel */}
-              <div className="bg-slate-800/80 border border-slate-700/80 p-1.5 sm:p-3 rounded-none flex flex-col items-center justify-center text-center">
-                <div className="flex items-center gap-1 text-amber-400 text-[9px] sm:text-[11px] font-bold mb-0.5 whitespace-nowrap">
-                  <Ear className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                  <span>
+              <div className="bg-[#2c2823] hover:bg-[#36312a] border border-[#4d4227] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
+                <div className="flex items-center justify-center gap-1.5 text-amber-400 text-xs font-bold mb-1">
+                  <Ear className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
                     {language === 'lo'
                       ? isDateFiltered ? 'ໄດ້ຍິນຂ່າວ (ເພີ່ມ)' : 'ໄດ້ຍິນຂ່າວ'
                       : language === 'th'
@@ -577,21 +631,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : isDateFiltered ? 'Heard (Added)' : 'Heard'}
                   </span>
                 </div>
-                <span className="text-base sm:text-2xl font-black text-amber-400">
+                <span className="text-xl sm:text-2xl font-black text-amber-400 tracking-tight tabular-nums">
                   <AnimatedCounter value={stats.heard} />
                 </span>
                 {isDateFiltered && (
-                  <span className="text-[8px] sm:text-[10px] text-slate-400 mt-0.5 block font-semibold">
+                  <span className="text-[10px] text-slate-400 mt-0.5 block font-semibold truncate">
                     {language === 'lo' ? `(ສະສົມ: ${stats.allTimeHeard.toLocaleString()})` : `(Total: ${stats.allTimeHeard.toLocaleString()})`}
                   </span>
                 )}
               </div>
 
               {/* Total Believers */}
-              <div className="bg-slate-800/80 border border-slate-700/80 p-1.5 sm:p-3 rounded-none flex flex-col items-center justify-center text-center">
-                <div className="flex items-center gap-1 text-red-400 text-[9px] sm:text-[11px] font-bold mb-0.5 whitespace-nowrap">
-                  <Heart className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 fill-red-500/20" />
-                  <span>
+              <div className="bg-[#311f2c] hover:bg-[#3c2536] border border-[#582a3e] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
+                <div className="flex items-center justify-center gap-1.5 text-rose-400 text-xs font-bold mb-1">
+                  <Heart className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
                     {language === 'lo'
                       ? isDateFiltered ? 'ຜູ້ເຊື່ອໃໝ່ (ເພີ່ມ)' : 'ຮັບເຊື່ອແລ້ວ'
                       : language === 'th'
@@ -599,21 +653,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : isDateFiltered ? 'New Believers' : 'Believers'}
                   </span>
                 </div>
-                <span className="text-base sm:text-2xl font-black text-red-400">
+                <span className="text-xl sm:text-2xl font-black text-rose-400 tracking-tight tabular-nums">
                   <AnimatedCounter value={stats.believers} />
                 </span>
                 {isDateFiltered && (
-                  <span className="text-[8px] sm:text-[10px] text-slate-400 mt-0.5 block font-semibold">
+                  <span className="text-[10px] text-slate-400 mt-0.5 block font-semibold truncate">
                     {language === 'lo' ? `(ສະສົມ: ${stats.allTimeBelievers.toLocaleString()})` : `(Total: ${stats.allTimeBelievers.toLocaleString()})`}
                   </span>
                 )}
               </div>
 
               {/* Total Baptized */}
-              <div className="bg-slate-800/80 border border-slate-700/80 p-1.5 sm:p-3 rounded-none flex flex-col items-center justify-center text-center">
-                <div className="flex items-center gap-1 text-emerald-400 text-[9px] sm:text-[11px] font-bold mb-0.5 whitespace-nowrap">
-                  <Droplets className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                  <span>
+              <div className="bg-[#132f32] hover:bg-[#17393d] border border-[#1f4e4b] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
+                <div className="flex items-center justify-center gap-1.5 text-emerald-400 text-xs font-bold mb-1">
+                  <Droplets className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
                     {language === 'lo'
                       ? isDateFiltered ? 'ບັບຕິສະມາ (ເພີ່ມ)' : 'ຮັບບັບຕິສະມາ'
                       : language === 'th'
@@ -621,21 +675,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : isDateFiltered ? 'Baptized (Added)' : 'Baptized'}
                   </span>
                 </div>
-                <span className="text-base sm:text-2xl font-black text-emerald-400">
+                <span className="text-xl sm:text-2xl font-black text-emerald-400 tracking-tight tabular-nums">
                   <AnimatedCounter value={stats.baptized} />
                 </span>
                 {isDateFiltered && (
-                  <span className="text-[8px] sm:text-[10px] text-slate-400 mt-0.5 block font-semibold">
+                  <span className="text-[10px] text-slate-400 mt-0.5 block font-semibold truncate">
                     {language === 'lo' ? `(ສະສົມ: ${stats.allTimeBaptized.toLocaleString()})` : `(Total: ${stats.allTimeBaptized.toLocaleString()})`}
                   </span>
                 )}
               </div>
 
               {/* Worship Attendance */}
-              <div className="bg-slate-800/80 border border-slate-700/80 p-1.5 sm:p-3 rounded-none flex flex-col items-center justify-center text-center">
-                <div className="flex items-center gap-1 text-cyan-400 text-[9px] sm:text-[11px] font-bold mb-0.5 whitespace-nowrap">
-                  <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                  <span>
+              <div className="bg-[#132a42] hover:bg-[#173350] border border-[#1e4568] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
+                <div className="flex items-center justify-center gap-1.5 text-cyan-400 text-xs font-bold mb-1">
+                  <Users className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
                     {language === 'lo'
                       ? 'ນະມັດສະການ'
                       : language === 'th'
@@ -643,16 +697,16 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : 'Worshipers'}
                   </span>
                 </div>
-                <span className="text-base sm:text-2xl font-black text-cyan-400">
+                <span className="text-xl sm:text-2xl font-black text-cyan-400 tracking-tight tabular-nums">
                   <AnimatedCounter value={stats.attending} />
                 </span>
               </div>
 
               {/* Leaders Trained */}
-              <div className="bg-slate-800/80 border border-slate-700/80 p-1.5 sm:p-3 rounded-none flex flex-col items-center justify-center text-center">
-                <div className="flex items-center gap-1 text-purple-400 text-[9px] sm:text-[11px] font-bold mb-0.5 whitespace-nowrap">
-                  <GraduationCap className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                  <span>
+              <div className="bg-[#251f42] hover:bg-[#2d2650] border border-[#3d2e68] rounded-xl p-3.5 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-xs">
+                <div className="flex items-center justify-center gap-1.5 text-purple-400 text-xs font-bold mb-1">
+                  <GraduationCap className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
                     {language === 'lo'
                       ? 'ຜູ້ອົບຮົມ/ຜູ້ນຳ'
                       : language === 'th'
@@ -660,7 +714,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       : 'Leaders'}
                   </span>
                 </div>
-                <span className="text-base sm:text-2xl font-black text-purple-400">
+                <span className="text-xl sm:text-2xl font-black text-purple-400 tracking-tight tabular-nums">
                   <AnimatedCounter value={stats.leaders} />
                 </span>
               </div>
@@ -670,17 +724,17 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       </div>
 
       {/* Main Charts & Urgent Needs Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
         {/* Growth Statistics by District View */}
-        <div className={`${showUrgent ? 'lg:col-span-1' : 'lg:col-span-2'} bg-white dark:bg-slate-800 p-2 sm:p-3 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm transition-all flex flex-col space-y-2.5`}>
+        <div className={`${showUrgent ? 'lg:col-span-1' : 'lg:col-span-2'} bg-white dark:bg-slate-900 p-4 sm:p-5 md:p-6 rounded-2xl shadow-xs transition-all flex flex-col space-y-4`}>
           {/* Header & Controls */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-100 dark:border-slate-700/60">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-none bg-red-50 dark:bg-red-950/40 text-[#cc0000]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-950/50 text-[#cc0000] dark:text-red-400 flex items-center justify-center font-bold shadow-2xs">
                   <TrendingUp className="w-4 h-4" />
                 </div>
-                <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+                <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white flex items-center gap-2 tracking-tight">
                   <span>
                     {chartViewTarget === 'church'
                       ? language === 'lo'
@@ -694,7 +748,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       ? 'สถิติการเติบโตตามแต่ละอำเภอ'
                       : 'Growth Statistics by District'}
                   </span>
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-none bg-red-50 dark:bg-red-950/60 text-[#cc0000] border border-red-200 dark:border-red-900/60">
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-red-50 dark:bg-red-950/60 text-[#cc0000] dark:text-red-400 border border-red-200/70 dark:border-red-900/60 shadow-2xs">
                     {activeChartData.length}{' '}
                     {chartViewTarget === 'church'
                       ? language === 'lo'
@@ -706,19 +760,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   </span>
                 </h3>
               </div>
-
             </div>
 
-            {/* Simple View Switcher (All Churches / By District) & Collapse Toggle */}
+            {/* View Switcher (All Churches / By District) & Collapse Toggle */}
             <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
               {/* Toggle to Show/Hide Filter Buttons */}
               <button
                 type="button"
                 onClick={() => setShowChartFilters(!showChartFilters)}
-                className={`p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 ${
+                className={`p-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs ${
                   showChartFilters
-                    ? 'bg-red-50 text-[#cc0000] border-red-200 dark:bg-red-950/40 dark:border-red-900/60'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-300 dark:border-slate-600'
+                    ? 'bg-red-50 text-[#cc0000] border-red-200/80 dark:bg-red-950/50 dark:border-red-900/60'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 dark:border-slate-700'
                 }`}
                 title={showChartFilters ? (language === 'lo' ? 'ເຊື່ອງປຸ່ມຟິວເຕີ' : 'Hide Filters') : (language === 'lo' ? 'ສະແດງປຸ່ມຟິວເຕີ' : 'Show Filters')}
                 aria-label="Toggle Filter Options"
@@ -728,14 +781,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
               {/* Smaller Collapsible Filter Switcher */}
               {showChartFilters && (
-                <div className="flex bg-slate-100 dark:bg-slate-900 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-inner animate-fade-in">
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/70 dark:border-slate-700/70 shadow-2xs animate-fade-in">
                   <button
                     type="button"
                     onClick={() => setChartViewTarget('church')}
-                    className={`px-2 py-0.5 text-[10px] sm:text-[11px] font-bold rounded-md transition cursor-pointer flex items-center gap-1 ${
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                       chartViewTarget === 'church'
-                        ? 'bg-white dark:bg-slate-700 text-[#cc0000] shadow-xs'
-                        : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                        ? 'bg-white dark:bg-slate-700 text-[#cc0000] dark:text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
                     }`}
                     title={language === 'lo' ? 'ສະແດງທຸກຄຣິດຕະຈັກ' : 'All Churches'}
                   >
@@ -745,10 +798,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   <button
                     type="button"
                     onClick={() => setChartViewTarget('district')}
-                    className={`px-2 py-0.5 text-[10px] sm:text-[11px] font-bold rounded-md transition cursor-pointer flex items-center gap-1 ${
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                       chartViewTarget === 'district'
-                        ? 'bg-white dark:bg-slate-700 text-[#cc0000] shadow-xs'
-                        : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                        ? 'bg-white dark:bg-slate-700 text-[#cc0000] dark:text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
                     }`}
                     title={language === 'lo' ? 'ສະແດງຕາມເມືອງ' : 'By District'}
                   >
@@ -762,11 +815,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               <button
                 type="button"
                 onClick={() => setShowCharts(!showCharts)}
-                className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-600 active:scale-95"
+                className="w-8 h-8 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0 border border-slate-200/60 dark:border-slate-700/60 shadow-2xs active:scale-95"
                 title={showCharts ? (language === 'lo' ? 'ເຊື່ອງສະຖິຕິ' : 'Collapse') : (language === 'lo' ? 'ສະແດງສະຖິຕິ' : 'Expand')}
               >
                 {showCharts ? (
-                  <ChevronUp className="w-4 h-4 text-[#cc0000]" />
+                  <ChevronUp className="w-4 h-4 text-[#cc0000] dark:text-red-400" />
                 ) : (
                   <ChevronDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 )}
@@ -800,7 +853,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                           bottom: activeChartData.length > 5 ? 20 : 8,
                         }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.6} vertical={false} />
                         <XAxis
                           dataKey="name"
                           stroke="#64748b"
@@ -834,19 +887,19 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                           contentStyle={{
                             backgroundColor: '#0f172a',
                             borderColor: '#334155',
-                            borderRadius: '0.5rem',
+                            borderRadius: '0.75rem',
                             color: '#ffffff',
-                            fontSize: '11px',
-                            boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-                            padding: '6px 10px',
+                            fontSize: '12px',
+                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)',
+                            padding: '8px 12px',
                           }}
                         />
-                        <Legend wrapperStyle={{ fontSize: '10.5px', paddingTop: '2px', lineHeight: '14px' }} />
+                        <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '4px', lineHeight: '16px' }} />
                         <Bar
                           dataKey="believers"
                           name={language === 'lo' ? 'ຜູ້ເຊື່ອ (Believers)' : 'Believers'}
                           fill="#cc0000"
-                          radius={[3, 3, 0, 0]}
+                          radius={[5, 5, 0, 0]}
                           isAnimationActive={true}
                           animationDuration={800}
                         />
@@ -854,7 +907,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                           dataKey="baptized"
                           name={language === 'lo' ? 'ຮັບບັບຕິສະມາ (Baptized)' : 'Baptized'}
                           fill="#10b981"
-                          radius={[3, 3, 0, 0]}
+                          radius={[5, 5, 0, 0]}
                           isAnimationActive={true}
                           animationDuration={900}
                         />
@@ -868,37 +921,39 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
 
         {/* Urgent Needs Panel */}
-        <div className={`${showCharts ? 'lg:col-span-1' : 'lg:col-span-2'} bg-white dark:bg-slate-800 p-2 sm:p-3 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col transition-all`}>
-          <h3 className="font-bold text-sm text-slate-800 dark:text-white mb-2.5 flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2">
-              <Bell className="w-4 h-4 text-amber-500 animate-bounce" />
-              <span>
+        <div className={`${showCharts ? 'lg:col-span-1' : 'lg:col-span-2'} bg-white dark:bg-slate-900 p-4 sm:p-5 md:p-6 rounded-2xl shadow-xs flex flex-col transition-all space-y-4`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shadow-2xs">
+                <Bell className="w-4 h-4 animate-bounce" />
+              </div>
+              <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
                 {language === 'lo'
                   ? 'ແຈ້ງເຕືອນເລັ່ງດ່ວນ (Urgent Needs)'
                   : language === 'th'
                   ? 'แจ้งเตือนเร่งด่วน (Urgent Needs)'
                   : 'Urgent Persecution / Needs Alerts'}
-              </span>
-            </span>
+              </h3>
+            </div>
             <button
               onClick={() => setShowUrgent(!showUrgent)}
-              className="p-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-none transition flex items-center justify-center shrink-0 cursor-pointer"
+              className="w-8 h-8 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer shadow-2xs border border-slate-200/60 dark:border-slate-700/60 active:scale-95"
               title={showUrgent ? (language === 'lo' ? 'ເຊື່ອງແຈ້ງເຕືອນ' : 'Collapse') : (language === 'lo' ? 'ສະແດງແຈ້ງເຕືອນ' : 'Expand')}
             >
               {showUrgent ? (
-                <ChevronUp className="w-4 h-4 text-[#cc0000]" />
+                <ChevronUp className="w-4 h-4 text-[#cc0000] dark:text-red-400" />
               ) : (
                 <ChevronDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               )}
             </button>
-          </h3>
+          </div>
 
           {showUrgent && (
             <div
               className={`overflow-y-auto flex-1 max-h-[360px] sm:max-h-[380px] pr-1.5 animate-fade-in ${
                 !showCharts
-                  ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 space-y-0'
-                  : 'space-y-2'
+                  ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 space-y-0'
+                  : 'space-y-2.5'
               }`}
             >
               {urgentVillages.length === 0 ? (
@@ -910,24 +965,25 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                     : 'No urgent alerts reported at this time 🟢'}
                 </div>
               ) : (
-                urgentVillages.map((v, idx) => (
-                  <motion.div
+                urgentVillages.map((v) => (
+                  <div
                     key={v.rowId || v.id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, delay: idx * 0.04 }}
-                    className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-red-50/90 hover:bg-red-100/70 dark:bg-red-950/30 dark:hover:bg-red-950/50 border-l-4 border-[#cc0000] border-y border-r border-red-200/60 dark:border-red-900/30 rounded-lg space-y-1 transition-all shadow-2xs"
+                    className={`p-3.5 sm:p-4 rounded-xl border transition-all duration-200 space-y-1.5 shadow-2xs hover:-translate-y-0.5 ${
+                      v.persecution === 'ວິກິດ' || v.persecution === 'critical'
+                        ? 'bg-red-50/70 hover:bg-red-50 dark:bg-red-950/30 dark:hover:bg-red-950/50 border-red-200/80 dark:border-red-900/50'
+                        : 'bg-amber-50/70 hover:bg-amber-50 dark:bg-amber-950/30 dark:hover:bg-amber-950/50 border-amber-200/80 dark:border-amber-900/50'
+                    }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <h4 className="font-bold text-xs sm:text-[13px] text-red-700 dark:text-red-400 flex items-center gap-1.5 min-w-0">
-                        <AlertTriangle className="w-3.5 h-3.5 text-[#cc0000] shrink-0" />
+                      <h4 className="font-bold text-xs sm:text-[13px] text-slate-900 dark:text-white flex items-center gap-1.5 min-w-0">
+                        <AlertTriangle className="w-4 h-4 text-[#cc0000] shrink-0" />
                         <span className="truncate">
                           {getLocalizedVillageName(v, language) || v.name || v.id}
                           {v.district ? ` (${getLocalizedDistrict(v.district, language)})` : ''}
                         </span>
                       </h4>
                       <span
-                        className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-2xs ${
+                        className={`text-[10px] sm:text-[11px] font-bold px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs ${
                           v.persecution === 'ວິກິດ' || v.persecution === 'critical'
                             ? 'bg-red-200 text-red-900 dark:bg-red-900 dark:text-red-100'
                             : 'bg-amber-100 text-amber-900 dark:bg-amber-900/60 dark:text-amber-200'
@@ -936,10 +992,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                         {getLocalizedStatus(v.persecution, language)}
                       </span>
                     </div>
-                    <p className="text-[11px] sm:text-xs text-slate-700 dark:text-slate-300 leading-snug font-medium">
+                    <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
                       {getLocalizedNeeds(v, language)}
                     </p>
-                  </motion.div>
+                  </div>
                 ))
               )}
             </div>
@@ -948,22 +1004,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       </div>
 
       {/* Comprehensive Excel Data Table Section (Full Interactive Grid) */}
-      <div className="bg-white dark:bg-slate-800 p-2 sm:p-3 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm space-y-2.5 sm:space-y-3.5 animate-fade-in">
+      <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 md:p-6 rounded-2xl shadow-xs space-y-4 animate-fade-in transition-colors">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowFullTable(!showFullTable)}
-              className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-none transition flex items-center justify-center shrink-0 cursor-pointer"
-              title={showFullTable ? (language === 'lo' ? 'ເຊື່ອງຕາຕະລາງ' : 'Collapse') : (language === 'lo' ? 'ສະແດງຕາຕະລາງ' : 'Expand')}
-            >
-              {showFullTable ? (
-                <ChevronUp className="w-4 h-4 text-[#cc0000]" />
-              ) : (
-                <ChevronDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              )}
-            </button>
-            <TableIcon className="w-4 h-4 text-amber-500 shrink-0" />
-            <h3 className="font-bold text-sm sm:text-base text-slate-800 dark:text-white">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold shadow-2xs">
+              <TableIcon className="w-4 h-4" />
+            </div>
+            <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
               {language === 'lo'
                 ? 'ຕາຕະລາງຂໍ້ມູນພັນທະກິດແບບລະອຽດ (Interactive Data Table)'
                 : language === 'th'
@@ -971,230 +1018,242 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 : 'Interactive Ministry Data Table'}
             </h3>
           </div>
+
+          <button
+            onClick={() => setShowFullTable(!showFullTable)}
+            className="w-8 h-8 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer shadow-2xs border border-slate-200/60 dark:border-slate-700/60 active:scale-95"
+            title={showFullTable ? (language === 'lo' ? 'ເຊື່ອງຕາຕະລາງ' : 'Collapse') : (language === 'lo' ? 'ສະແດງຕາຕະລາງ' : 'Expand')}
+          >
+            {showFullTable ? (
+              <ChevronUp className="w-4 h-4 text-[#cc0000] dark:text-red-400" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            )}
+          </button>
         </div>
 
         {showFullTable && (
-          <div className="space-y-3 animate-fade-in">
-          {/* Search & Export Controls (Small, in the SAME row) */}
-          <div className="flex flex-row items-center gap-2 w-full">
-            <div className="relative flex-1 min-w-0">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={tableSearch}
-                onChange={(e) => setTableSearch(e.target.value)}
-                placeholder={
-                  language === 'lo'
-                    ? 'ຄົ້ນຫາບ້ານ, ເມືອງ, ຜູ້ເຊື່ອ, ສະຖານະ, ຄວາມຕ້ອງການ...'
-                    : language === 'th'
-                    ? 'ค้นหาหมู่บ้าน, อำเภอ, ผู้เชื่อ, สถานะ, ความต้องการ...'
-                    : 'Search villages, districts, believers, needs...'
-                }
-                className="w-full pl-8 pr-2.5 py-1 h-8 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-none text-xs font-medium text-slate-800 dark:text-white outline-none focus:ring-1 focus:ring-[#cc0000]"
-              />
+          <div className="space-y-3.5 animate-fade-in">
+            {/* Search & Export Controls */}
+            <div className="flex flex-row items-center gap-2.5 w-full">
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={tableSearch}
+                  onChange={(e) => setTableSearch(e.target.value)}
+                  placeholder={
+                    language === 'lo'
+                      ? 'ຄົ້ນຫາບ້ານ, ເມືອງ, ຜູ້ເຊື່ອ, ສະຖານະ, ຄວາມຕ້ອງການ...'
+                      : language === 'th'
+                      ? 'ค้นหาหมู่บ้าน, อำเภอ, ผู้เชื่อ, สถานะ, ความต้องการ...'
+                      : 'Search villages, districts, believers, needs...'
+                  }
+                  className="w-full pl-9 pr-3 py-2 h-10 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs sm:text-sm font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-[#cc0000]/20 focus:border-[#cc0000] transition-all shadow-2xs"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="h-10 px-4 py-2 bg-[#cc0000] hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shrink-0 cursor-pointer shadow-xs transition-all duration-200"
+              >
+                <Download className="w-4 h-4" />
+                <span className="whitespace-nowrap">
+                  {language === 'lo' ? 'ດາວໂຫຼດ CSV' : language === 'th' ? 'ส่งออก CSV' : 'Export CSV'}
+                </span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleExportCSV}
-              className="h-8 px-3 py-1 bg-[#cc0000] hover:bg-black text-white rounded-none text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer shadow-xs transition"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span className="whitespace-nowrap">
-                {language === 'lo' ? 'ດາວໂຫຼດ CSV' : language === 'th' ? 'ส่งออก CSV' : 'Export CSV'}
-              </span>
-            </button>
-          </div>
 
-          {/* Full Table */}
-        <div className="overflow-x-auto max-h-[450px] border border-slate-200 dark:border-slate-700 rounded-none">
-          <table className="w-full text-left text-xs whitespace-nowrap">
-            <thead className="bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold sticky top-0 z-10 shadow-sm">
-              <tr>
-                <th
-                  onClick={() => toggleSort('name')}
-                  className="px-4 py-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>{language === 'lo' ? 'ຄິດສະຈັກ / ບ້ານ' : language === 'th' ? 'คริสตจักร / หมู่บ้าน' : 'Church / Village'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+            {/* Full Table */}
+            <div className="overflow-x-auto max-h-[480px] border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-2xs">
+              <table className="w-full text-left text-xs sm:text-[13px] whitespace-nowrap">
+                <thead className="bg-slate-50/90 dark:bg-slate-800/90 backdrop-blur-xs text-slate-700 dark:text-slate-200 font-bold sticky top-0 z-10 border-b border-slate-200/80 dark:border-slate-700">
+                  <tr>
+                    <th
+                      onClick={() => toggleSort('name')}
+                      className="px-4 py-3.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>{language === 'lo' ? 'ຄິດສະຈັກ / ບ້ານ' : language === 'th' ? 'คริสตจักร / หมู่บ้าน' : 'Church / Village'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('district')}
-                  className="px-4 py-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>{language === 'lo' ? 'ເມືອງ, ແຂວງ' : language === 'th' ? 'เมือง, แขวง' : 'Location'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+                    <th
+                      onClick={() => toggleSort('district')}
+                      className="px-4 py-3.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>{language === 'lo' ? 'ເມືອງ, ແຂວງ' : language === 'th' ? 'เมือง, แขวง' : 'Location'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('heard')}
-                  className="px-4 py-3 text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition text-blue-600 dark:text-blue-400"
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <span>{language === 'lo' ? 'ຜູ້ໄດ້ຍິນຂ່າວປະເສີດ' : language === 'th' ? 'ผู้ได้ยินข่าวประเสริฐ' : 'Heard Gospel'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+                    <th
+                      onClick={() => toggleSort('heard')}
+                      className="px-4 py-3.5 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition text-blue-600 dark:text-blue-400"
+                    >
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{language === 'lo' ? 'ຜູ້ໄດ້ຍິນຂ່າວປະເສີດ' : language === 'th' ? 'ผู้ได้ยินข่าวประเสริฐ' : 'Heard Gospel'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('believers')}
-                  className="px-4 py-3 text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition text-red-600 dark:text-red-400"
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <span>{language === 'lo' ? 'ຜູ້ເຊື່ອ' : language === 'th' ? 'ผู้เชื่อ' : 'Believers'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+                    <th
+                      onClick={() => toggleSort('believers')}
+                      className="px-4 py-3.5 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition text-[#cc0000] dark:text-red-400"
+                    >
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{language === 'lo' ? 'ຜູ້ເຊື່ອ' : language === 'th' ? 'ผู้เชื่อ' : 'Believers'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('baptized')}
-                  className="px-4 py-3 text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition text-emerald-600 dark:text-emerald-400"
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <span>{language === 'lo' ? 'ບັບຕິສະມາ' : language === 'th' ? 'บัพติศมา' : 'Baptized'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+                    <th
+                      onClick={() => toggleSort('baptized')}
+                      className="px-4 py-3.5 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition text-emerald-600 dark:text-emerald-400"
+                    >
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{language === 'lo' ? 'ບັບຕິສະມາ' : language === 'th' ? 'บัพติศมา' : 'Baptized'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('attending')}
-                  className="px-4 py-3 text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition text-cyan-600 dark:text-cyan-400"
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <span>{language === 'lo' ? 'ຜູ້ມານະມັດສະການ' : language === 'th' ? 'ผู้มาร่วมนมัสการ' : 'Worshipers'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+                    <th
+                      onClick={() => toggleSort('attending')}
+                      className="px-4 py-3.5 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition text-cyan-600 dark:text-cyan-400"
+                    >
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{language === 'lo' ? 'ຜູ້ມານະມັດສະການ' : language === 'th' ? 'ผู้มาร่วมนมัสการ' : 'Worshipers'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('leaders')}
-                  className="px-4 py-3 text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition text-purple-600 dark:text-purple-400"
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <span>{language === 'lo' ? 'ຜູ້ນຳ' : language === 'th' ? 'ผู้นำ' : 'Leaders'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+                    <th
+                      onClick={() => toggleSort('leaders')}
+                      className="px-4 py-3.5 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition text-purple-600 dark:text-purple-400"
+                    >
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{language === 'lo' ? 'ຜູ້ນຳ' : language === 'th' ? 'ผู้นำ' : 'Leaders'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('persecution')}
-                  className="px-4 py-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition"
-                >
-                  <div className="flex items-center gap-1">
-                    <span>{language === 'lo' ? 'ສະຖານະ' : language === 'th' ? 'สถานะ' : 'Status'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
+                    <th
+                      onClick={() => toggleSort('persecution')}
+                      className="px-4 py-3.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>{language === 'lo' ? 'ສະຖານະ' : language === 'th' ? 'สถานะ' : 'Status'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
 
-                <th
-                  onClick={() => toggleSort('date')}
-                  className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition"
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    <span>{language === 'lo' ? 'ວັນທີອັບເດດ' : language === 'th' ? 'วันที่อัปเดต' : 'Last Updated'}</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                  </div>
-                </th>
-              </tr>
-            </thead>
+                    <th
+                      onClick={() => toggleSort('date')}
+                      className="px-4 py-3.5 text-right cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                    >
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span>{language === 'lo' ? 'ວັນທີອັບເດດ' : language === 'th' ? 'วันที่อัปเดต' : 'Last Updated'}</span>
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
 
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700 text-slate-700 dark:text-slate-300 font-medium">
-              {tableVillages.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="text-center py-8 text-slate-400 text-xs font-medium">
-                    {language === 'lo' ? 'ບໍ່ພົບຂໍ້ມູນທີ່ກົງກັບການຄົ້ນຫາ' : language === 'th' ? 'ไม่พบข้อมูลที่ตรงกับการค้นหา' : 'No records found.'}
-                  </td>
-                </tr>
-              ) : (
-                tableVillages.map((v) => {
-                  const statusBadge =
-                    v.persecution === 'ວິກິດ'
-                      ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
-                      : v.persecution === 'ປານກາງ'
-                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300';
-
-                  return (
-                    <tr key={v.rowId || v.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">
-                      <td className="px-4 py-3 font-bold text-slate-800 dark:text-white">
-                        ⛪ {getLocalizedVillageName(v, language)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                        {getLocalizedDistrict(v.district, language)}, {getLocalizedProvince(v.province, language)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-bold text-blue-600">
-                        {formatNumber(v.heard)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-bold text-[#cc0000]">
-                        {formatNumber(v.believers)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-bold text-emerald-600">
-                        {formatNumber(v.baptized)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-bold text-cyan-600">
-                        {formatNumber(v.attending)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-bold text-purple-600">
-                        {formatNumber(v.leaders)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-none text-[10px] font-bold ${statusBadge}`}>
-                          {getLocalizedStatus(v.persecution, language)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-400 text-[11px]">
-                        {v.date ? new Date(v.date).toLocaleDateString() : '-'}
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-medium">
+                  {tableVillages.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="text-center py-10 text-slate-400 text-xs font-medium">
+                        {language === 'lo' ? 'ບໍ່ພົບຂໍ້ມູນທີ່ກົງກັບການຄົ້ນຫາ' : language === 'th' ? 'ไม่พบข้อมูลที่ตรงกับการค้นหา' : 'No records found.'}
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
+                  ) : (
+                    tableVillages.map((v) => {
+                      const statusBadge =
+                        v.persecution === 'ວິກິດ'
+                          ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border border-red-200/80 dark:border-red-900/50'
+                          : v.persecution === 'ປານກາງ'
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200/80 dark:border-amber-900/50'
+                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-900/50';
 
-            {/* Total Summary Row */}
-            <tfoot className="bg-slate-100 dark:bg-slate-900 font-bold text-slate-800 dark:text-white border-t-2 border-slate-200 dark:border-slate-700">
-              <tr>
-                <td className="px-4 py-3">
-                  {language === 'lo' ? '📊 ຜົນລວມທັງໝົດ:' : language === 'th' ? '📊 ผลรวมทั้งหมด:' : 'Total Summary:'}
-                </td>
-                <td className="px-4 py-3"></td>
-                <td className="px-4 py-3 text-center text-blue-600 text-sm font-extrabold">
-                  {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.heard) || 0), 0))}
-                </td>
-                <td className="px-4 py-3 text-center text-[#cc0000] text-sm font-extrabold">
-                  {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.believers) || 0), 0))}
-                </td>
-                <td className="px-4 py-3 text-center text-emerald-600 text-sm font-extrabold">
-                  {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.baptized) || 0), 0))}
-                </td>
-                <td className="px-4 py-3 text-center text-cyan-600 text-sm font-extrabold">
-                  {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.attending) || 0), 0))}
-                </td>
-                <td className="px-4 py-3 text-center text-purple-600 text-sm font-extrabold">
-                  {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.leaders) || 0), 0))}
-                </td>
-                <td className="px-4 py-3" colSpan={2}></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
-      )}
+                      return (
+                        <tr key={v.rowId || v.id} className="hover:bg-red-50/30 dark:hover:bg-slate-800/60 transition-colors">
+                          <td className="px-4 py-3.5 font-bold text-slate-900 dark:text-white">
+                            ⛪ {getLocalizedVillageName(v, language)}
+                          </td>
+                          <td className="px-4 py-3.5 text-slate-600 dark:text-slate-300">
+                            {getLocalizedDistrict(v.district, language)}, {getLocalizedProvince(v.province, language)}
+                          </td>
+                          <td className="px-4 py-3.5 text-center font-bold text-blue-600 dark:text-blue-400">
+                            {formatNumber(v.heard)}
+                          </td>
+                          <td className="px-4 py-3.5 text-center font-bold text-[#cc0000] dark:text-red-400">
+                            {formatNumber(v.believers)}
+                          </td>
+                          <td className="px-4 py-3.5 text-center font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatNumber(v.baptized)}
+                          </td>
+                          <td className="px-4 py-3.5 text-center font-bold text-cyan-600 dark:text-cyan-400">
+                            {formatNumber(v.attending)}
+                          </td>
+                          <td className="px-4 py-3.5 text-center font-bold text-purple-600 dark:text-purple-400">
+                            {formatNumber(v.leaders)}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold shadow-2xs ${statusBadge}`}>
+                              {getLocalizedStatus(v.persecution, language)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 text-right text-slate-500 dark:text-slate-400 text-xs">
+                            {v.date ? new Date(v.date).toLocaleDateString() : '-'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+
+                {/* Total Summary Row */}
+                <tfoot className="bg-slate-100/90 dark:bg-slate-800/90 font-black text-slate-900 dark:text-white border-t-2 border-slate-200 dark:border-slate-700">
+                  <tr>
+                    <td className="px-4 py-3.5">
+                      {language === 'lo' ? '📊 ຜົນລວມທັງໝົດ:' : language === 'th' ? '📊 ผลรวมทั้งหมด:' : 'Total Summary:'}
+                    </td>
+                    <td className="px-4 py-3.5"></td>
+                    <td className="px-4 py-3.5 text-center text-blue-600 dark:text-blue-400 text-sm font-black">
+                      {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.heard) || 0), 0))}
+                    </td>
+                    <td className="px-4 py-3.5 text-center text-[#cc0000] dark:text-red-400 text-sm font-black">
+                      {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.believers) || 0), 0))}
+                    </td>
+                    <td className="px-4 py-3.5 text-center text-emerald-600 dark:text-emerald-400 text-sm font-black">
+                      {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.baptized) || 0), 0))}
+                    </td>
+                    <td className="px-4 py-3.5 text-center text-cyan-600 dark:text-cyan-400 text-sm font-black">
+                      {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.attending) || 0), 0))}
+                    </td>
+                    <td className="px-4 py-3.5 text-center text-purple-600 dark:text-purple-400 text-sm font-black">
+                      {formatNumber(tableVillages.reduce((sum, v) => sum + (Number(v.leaders) || 0), 0))}
+                    </td>
+                    <td className="px-4 py-3.5" colSpan={2}></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Embedded Area & Map Section inside ຂໍ້ມູນເຊິງເລິກ (Deep Insights) */}
-      <div className="bg-white dark:bg-slate-800 p-5 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm space-y-4 animate-fade-in">
+      <div id="dashboard-area-map-section" className="bg-white dark:bg-slate-900 p-4 sm:p-5 md:p-6 rounded-2xl shadow-xs space-y-4 animate-fade-in transition-colors scroll-mt-20">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-none bg-red-100 dark:bg-red-950/50 text-[#cc0000] dark:text-red-400 flex items-center justify-center font-bold">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-950/50 text-[#cc0000] dark:text-red-400 flex items-center justify-center font-bold shadow-2xs">
               <Map className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-slate-800 dark:text-white">
+              <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
                 {language === 'lo' ? 'ພື້ນທີ່ ແລະ ແຜນທີ່ພັນທະກິດ (Area & Map)' : language === 'th' ? 'พื้นที่และแผนที่พันธกิจ (Area & Map)' : 'Area & Ministry Map'}
               </h3>
             </div>
@@ -1202,11 +1261,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
           <button
             onClick={() => setShowMapSection(!showMapSection)}
-            className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-none transition flex items-center justify-center shrink-0"
+            className="w-8 h-8 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer shadow-2xs border border-slate-200/60 dark:border-slate-700/60 active:scale-95"
             title={showMapSection ? (language === 'lo' ? 'ເຊື່ອງແຜນທີ່' : 'Collapse') : (language === 'lo' ? 'ສະແດງແຜນທີ່' : 'Expand')}
           >
             {showMapSection ? (
-              <ChevronUp className="w-4 h-4 text-[#cc0000]" />
+              <ChevronUp className="w-4 h-4 text-[#cc0000] dark:text-red-400" />
             ) : (
               <ChevronDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             )}
@@ -1214,7 +1273,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
 
         {showMapSection && (
-          <div className="animate-fade-in pt-2">
+          <div className="animate-fade-in pt-1 rounded-xl overflow-hidden">
             <MapsTab
               villages={filteredVillages}
               language={language}

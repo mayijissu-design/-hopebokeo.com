@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
@@ -8,9 +9,12 @@ import {
   doc,
   getDocs,
   getDoc,
+  getDocFromServer,
   setDoc,
   deleteDoc,
   onSnapshot,
+  enableNetwork,
+  disableNetwork,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -19,22 +23,104 @@ setLogLevel('error');
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
+export const auth = getAuth(app);
+
 const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
 
 let dbInstance: ReturnType<typeof getFirestore>;
 
 try {
-  dbInstance = initializeFirestore(app, {
-    localCache: typeof window !== 'undefined' ? memoryLocalCache() : undefined,
-    experimentalAutoDetectLongPolling: true,
-  }, databaseId);
+  // Use memoryLocalCache to eliminate IndexedDB primary lease contention in multi-tab / iframe preview environments
+  // (prevents: "Failed to obtain primary lease for action 'Apply remote event' / 'Collect garbage' / 'Backfill Indexes'")
+  // and experimentalForceLongPolling to avoid WebSocket handshake issues in Cloud Run / iframe environments
+  dbInstance = initializeFirestore(
+    app,
+    {
+      localCache: memoryLocalCache(),
+      experimentalForceLongPolling: true,
+    },
+    databaseId
+  );
 } catch {
-  // If already initialized or fallback needed
   dbInstance = getFirestore(app, databaseId);
 }
 
 export const db = dbInstance;
 
-export { collection, doc, getDocs, getDoc, setDoc, deleteDoc, onSnapshot };
+// Connection validation as required by skill guidelines
+if (typeof window !== 'undefined') {
+  (async () => {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error('Please check your Firebase configuration.');
+      }
+    }
+  })();
+}
 
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
 
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo:
+        auth.currentUser?.providerData?.map((provider) => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+export {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  getDocFromServer,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  enableNetwork,
+  disableNetwork,
+};

@@ -13,6 +13,7 @@ import {
   ZoomIn,
   Move,
   RotateCcw,
+  ChevronDown,
 } from 'lucide-react';
 import { UnifiedMediaUploader } from './UnifiedMediaUploader';
 import { RichTextEditor } from './RichTextEditor';
@@ -63,6 +64,21 @@ interface AboutPosterSettingsSectionProps {
   setBokeoTimelineTitleTh?: (val: string) => void;
   hideBokeoTimeline?: boolean;
   setHideBokeoTimeline?: (val: boolean) => void;
+  // Vision & Mission props
+  vision?: string;
+  setVision?: (val: string) => void;
+  visionEn?: string;
+  setVisionEn?: (val: string) => void;
+  visionTh?: string;
+  setVisionTh?: (val: string) => void;
+  mission?: string;
+  setMission?: (val: string) => void;
+  missionEn?: string;
+  setMissionEn?: (val: string) => void;
+  missionTh?: string;
+  setMissionTh?: (val: string) => void;
+  hideVisionMission?: boolean;
+  setHideVisionMission?: (val: boolean) => void;
   isSaving: boolean;
   onSave: () => void;
 }
@@ -128,14 +144,40 @@ export const AboutPosterSettingsSection: React.FC<AboutPosterSettingsSectionProp
   setBokeoTimelineTitleTh,
   hideBokeoTimeline = false,
   setHideBokeoTimeline,
+  vision = '',
+  setVision,
+  visionEn = '',
+  setVisionEn,
+  visionTh = '',
+  setVisionTh,
+  mission = '',
+  setMission,
+  missionEn = '',
+  setMissionEn,
+  missionTh = '',
+  setMissionTh,
+  hideVisionMission = false,
+  setHideVisionMission,
   isSaving,
   onSave,
 }) => {
   const [activeLangTab, setActiveLangTab] = useState<'lo' | 'en' | 'th'>(
     language === 'en' ? 'en' : language === 'th' ? 'th' : 'lo'
   );
+  const [visionLang, setVisionLang] = useState<'la' | 'tha' | 'en'>(
+    language === 'en' ? 'en' : language === 'th' ? 'tha' : 'la'
+  );
+  const [missionLang, setMissionLang] = useState<'la' | 'tha' | 'en'>(
+    language === 'en' ? 'en' : language === 'th' ? 'tha' : 'la'
+  );
   const [isDraggingPoster, setIsDraggingPoster] = useState(false);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const previewRef = useRef<HTMLDivElement>(null);
+
+  const toggleSection = (key: string) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+  const isOpen = (key: string) => Boolean(openSections[key]);
 
   const updateFocalPointFromCoords = (clientX: number, clientY: number) => {
     if (!previewRef.current || !setBokeoPosterPosition) return;
@@ -185,12 +227,12 @@ export const AboutPosterSettingsSection: React.FC<AboutPosterSettingsSectionProp
 
   const effectivePoster =
     posterBokeoImageUrl ||
-    'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?q=80&w=1200';
+    '/uploads/416848893_1441279663411460_5205317115984311446_n__1__jpg_1788632235891_514.jpg';
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div id="about-poster-settings" className="space-y-3.5 animate-fade-in scroll-mt-24">
       {/* Header bar */}
-      <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-[#cc0000] font-black text-xs uppercase tracking-wider mb-1">
             <Compass className="w-4 h-4" />
@@ -232,217 +274,221 @@ export const AboutPosterSettingsSection: React.FC<AboutPosterSettingsSectionProp
             </button>
           </div>
         </div>
+      </div>
 
+      {/* 1. Poster Image Upload & Live Preview */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs overflow-hidden">
         <button
           type="button"
-          onClick={onSave}
-          disabled={isSaving}
-          className="px-5 py-2.5 bg-[#cc0000] hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs shadow-md transition flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          onClick={() => toggleSection('cover')}
+          className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition cursor-pointer"
         >
-          {isSaving ? (
-            <span className="w-4 h-4 border-2 border-white border-t-transparent animate-spin" />
-          ) : (
-            <Save className="w-4 h-4" />
-          )}
-          <span>
-            {language === 'lo'
-              ? 'ບັນທຶກການຕັ້ງຄ່າ'
-              : language === 'th'
-              ? 'บันทึกการตั้งค่า'
-              : 'Save Settings'}
-          </span>
+          <div className="flex items-center gap-2.5">
+            <ImageIcon className="w-4 h-4 text-[#cc0000] shrink-0" />
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+              {language === 'lo'
+                ? '1. ຮູບພາບໂພສເຕີ & ຕົວຢ່າງການສະແດງຜົນ (Poster Cover Image & Live Preview)'
+                : '1. Poster Cover Image & Live Preview'}
+            </h3>
+          </div>
+          <ChevronDown
+            className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+              isOpen('cover') ? 'rotate-0' : '-rotate-90'
+            }`}
+          />
         </button>
-      </div>
 
-      {/* Live Realistic Preview showing title inside poster */}
-      <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-emerald-600" />
-            <h3 className="font-bold text-xs text-slate-800 dark:text-white uppercase tracking-wider">
-              {language === 'lo'
-                ? 'ຕົວຢ່າງການສະແດງຜົນເທິງເວັບ (Live Preview)'
-                : 'Live Website Preview'}
-            </h3>
-          </div>
-          <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
-            {language === 'lo' ? '✓ ຫົວຂໍ້ຢູ່ພາຍໃນໂພສເຕີ' : '✓ Title inside poster banner'}
-          </span>
-        </div>
-
-        {/* The Poster Mockup */}
-        <div
-          ref={previewRef}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          className="relative w-full overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 flex items-end shadow-inner transition-all select-none touch-none cursor-crosshair group"
-          style={{
-            minHeight: `${Math.round(180 + (bokeoPosterHeight / 100) * 260)}px`,
-            maxHeight: `${Math.round(180 + (bokeoPosterHeight / 100) * 260)}px`,
-            ...(bokeoPosterEdgeFade > 0
-              ? {
-                  WebkitMaskImage: `linear-gradient(to bottom, transparent 0px, black ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px, black calc(100% - ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px), transparent 100%)`,
-                  maskImage: `linear-gradient(to bottom, transparent 0px, black ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px, black calc(100% - ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px), transparent 100%)`,
-                }
-              : {}),
-          }}
-        >
-          <img
-            src={effectivePoster}
-            alt="Preview"
-            className="absolute inset-0 w-full h-full pointer-events-none select-none transition-all"
-            style={{
-              objectFit: bokeoPosterFit,
-              objectPosition: bokeoPosterPosition,
-              transformOrigin: bokeoPosterPosition,
-              transform: `scale(${bokeoPosterScale / 100})`,
-              filter: `brightness(${Math.max(20, 100 - bokeoPosterDim * 0.75)}%)`,
-            }}
-            referrerPolicy="no-referrer"
-          />
-
-          {/* Focal Center Target Indicator */}
-          <div
-            className="absolute w-8 h-8 -ml-4 -mt-4 rounded-full border-2 border-white bg-[#cc0000] shadow-2xl pointer-events-none flex items-center justify-center text-white ring-4 ring-red-500/40 z-30 transition-transform active:scale-125"
-            style={{
-              left: bokeoPosterPosition.split(' ')[0],
-              top: bokeoPosterPosition.split(' ')[1] || '50%',
-            }}
-            title={language === 'lo' ? 'ຈຸດສູນກາງຮູບ' : 'Focal Center'}
-          >
-            <Crosshair className="w-4 h-4 animate-pulse" />
-          </div>
-
-          {/* Indicator Overlay with position and scale values */}
-          <div className="absolute top-2.5 right-2.5 z-20 pointer-events-none flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-xs px-2.5 py-0.5 rounded-full border border-red-500/30 text-[10px] font-mono text-amber-300 shadow">
-            <span>📍 {bokeoPosterPosition}</span>
-            <span className="text-slate-500">•</span>
-            <span>🔍 {bokeoPosterScale}%</span>
-          </div>
-
-          <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none bg-slate-950/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-slate-700/60 text-[10px] text-slate-300 flex items-center gap-1.5">
-            <Move className="w-3 h-3 text-[#cc0000] shrink-0" />
-            <span>
-              {language === 'lo'
-                ? 'ແຕະ ຫຼື ລາກເທິງຮູບເພື່ອປັບຈຸດສູນກາງ'
-                : 'Click or drag on image to set focal position'}
-            </span>
-          </div>
-
-          <div
-            className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none transition-opacity"
-            style={{ opacity: bokeoPosterOverlayOpacity / 100 }}
-          />
-
-          <div className="relative z-10 w-full p-4 sm:p-6 flex items-end justify-between gap-3">
-            <div className="space-y-1 max-w-xl">
-              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-[#cc0000] text-white font-black text-[10px] uppercase tracking-wider">
-                <Compass className="w-3 h-3 text-white" />
-                <span>HOPE BOKEO</span>
-              </div>
-              <h2 className="text-lg sm:text-2xl font-black text-white drop-shadow-md truncate">
-                {currentTitle || 'HOPE BOKEO - ແຂວງບໍ່ແກ້ວ'}
-              </h2>
-              <p className="text-[11px] text-slate-200 font-medium line-clamp-1">
-                {language === 'lo'
-                  ? 'ສູນລວມການຈັດການພັນທະກິດ, ການພັດທະນາຊຸມຊົນ ແລະ ຄຣິດຕະຈັກ 5 ເມືອງ'
-                  : 'Centralized ministry and church platform across 5 districts'}
-              </p>
-            </div>
-            <span className="px-2.5 py-1 bg-black/60 border border-white/20 text-white text-[10px] font-bold shrink-0">
-              {language === 'lo' ? 'ອ່ານເພີ່ມເຕີມ' : 'Read Story'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 1. Poster Image Upload & Presets */}
-      <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-          <div className="flex items-center gap-2">
-            <ImageIcon className="w-4 h-4 text-[#cc0000]" />
-            <h3 className="font-bold text-sm text-slate-800 dark:text-white">
-              {language === 'lo'
-                ? '1. ຮູບພາບໂພສເຕີ (Poster Cover Image)'
-                : '1. Poster Cover Image'}
-            </h3>
-          </div>
+        {isOpen('cover') && (
+        <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 dark:border-slate-700 space-y-5">
           {posterBokeoImageUrl && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPosterBokeoImageUrl('')}
+                className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/50 text-xs text-red-600 hover:text-red-700 dark:text-red-400 font-bold flex items-center gap-1.5 cursor-pointer transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{language === 'lo' ? 'ລຶບຮູບໂພສເຕີ' : 'Remove Image'}</span>
+              </button>
+            </div>
+          )}
+          <UnifiedMediaUploader
+            value={posterBokeoImageUrl}
+            onChange={setPosterBokeoImageUrl}
+            language={language}
+            acceptTypes="image/*"
+            maxDimension={2560}
+            maxStringLength={750000}
+            label={
+              language === 'lo'
+                ? 'ເລືອກໄຟລ໌ຮູບພາບ ຫຼື ວາງລິ້ງ URL ຂອງໂພສເຕີ:'
+                : 'Upload Image File or Paste Poster URL:'
+            }
+          />
+
+          {/* Live Realistic Preview showing title inside poster */}
+          <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-emerald-600" />
+                <h4 className="font-extrabold text-xs text-slate-800 dark:text-white uppercase tracking-wider">
+                  {language === 'lo'
+                    ? 'ຕົວຢ່າງການສະແດງຜົນເທິງເວັບ (Live Preview)'
+                    : 'Live Website Preview'}
+                </h4>
+              </div>
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+                {language === 'lo' ? '✓ ຫົວຂໍ້ຢູ່ພາຍໃນໂພສເຕີ' : '✓ Title inside poster banner'}
+              </span>
+            </div>
+
+            {/* The Poster Mockup */}
+            <div
+              ref={previewRef}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              className="relative w-full overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 flex items-end shadow-inner transition-all select-none touch-none cursor-crosshair group rounded-lg"
+              style={{
+                minHeight: `${Math.round(140 + (bokeoPosterHeight / 100) * 140)}px`,
+                maxHeight: `${Math.round(140 + (bokeoPosterHeight / 100) * 140)}px`,
+                ...(bokeoPosterEdgeFade > 0
+                  ? {
+                      WebkitMaskImage: `linear-gradient(to bottom, transparent 0px, black ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px, black calc(100% - ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px), transparent 100%)`,
+                      maskImage: `linear-gradient(to bottom, transparent 0px, black ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px, black calc(100% - ${Math.round((bokeoPosterEdgeFade / 100) * 60)}px), transparent 100%)`,
+                    }
+                  : {}),
+              }}
+            >
+              <img
+                src={effectivePoster}
+                alt="Preview"
+                className="absolute inset-0 w-full h-full pointer-events-none select-none transition-all"
+                style={{
+                  objectFit: bokeoPosterFit,
+                  objectPosition: bokeoPosterPosition,
+                  transformOrigin: bokeoPosterPosition,
+                  transform: `scale(${bokeoPosterScale / 100})`,
+                  filter: `brightness(${Math.max(20, 100 - bokeoPosterDim * 0.75)}%)`,
+                }}
+                referrerPolicy="no-referrer"
+              />
+
+              {/* Focal Center Target Indicator */}
+              <div
+                className="absolute w-8 h-8 -ml-4 -mt-4 rounded-full border-2 border-white bg-[#cc0000] shadow-2xl pointer-events-none flex items-center justify-center text-white ring-4 ring-red-500/40 z-30 transition-transform active:scale-125"
+                style={{
+                  left: bokeoPosterPosition.split(' ')[0],
+                  top: bokeoPosterPosition.split(' ')[1] || '50%',
+                }}
+                title={language === 'lo' ? 'ຈຸດສູນກາງຮູບ' : 'Focal Center'}
+              >
+                <Crosshair className="w-4 h-4 animate-pulse" />
+              </div>
+
+              {/* Indicator Overlay with position and scale values */}
+              <div className="absolute top-2.5 right-2.5 z-20 pointer-events-none flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-xs px-2.5 py-0.5 rounded-full border border-red-500/30 text-[10px] font-mono text-amber-300 shadow">
+                <span>📍 {bokeoPosterPosition}</span>
+                <span className="text-slate-500">•</span>
+                <span>🔍 {bokeoPosterScale}%</span>
+              </div>
+
+              <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none bg-slate-950/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-slate-700/60 text-[10px] text-slate-300 flex items-center gap-1.5">
+                <Move className="w-3 h-3 text-[#cc0000] shrink-0" />
+                <span>
+                  {language === 'lo'
+                    ? 'ແຕະ ຫຼື ລາກເທິງຮູບເພື່ອປັບຈຸດສູນກາງ'
+                    : 'Click or drag on image to set focal position'}
+                </span>
+              </div>
+
+              <div
+                className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none transition-opacity"
+                style={{ opacity: bokeoPosterOverlayOpacity / 100 }}
+              />
+
+              <div className="relative z-10 w-full p-4 sm:p-6 flex items-end justify-between gap-3">
+                <div className="space-y-1 max-w-xl">
+                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-[#cc0000] text-white font-black text-[10px] uppercase tracking-wider">
+                    <Compass className="w-3 h-3 text-white" />
+                    <span>HOPE BOKEO</span>
+                  </div>
+                  <h2 className="text-lg sm:text-2xl font-black text-white drop-shadow-md truncate">
+                    {currentTitle || 'HOPE BOKEO - ແຂວງບໍ່ແກ້ວ'}
+                  </h2>
+                  <p className="text-[11px] text-slate-200 font-medium line-clamp-1">
+                    {language === 'lo'
+                      ? 'ສູນລວມການຈັດການພັນທະກິດ, ການພັດທະນາຊຸມຊົນ ແລະ ຄຣິດຕະຈັກ 5 ເມືອງ'
+                      : 'Centralized ministry and church platform across 5 districts'}
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 bg-black/60 border border-white/20 text-white text-[10px] font-bold shrink-0">
+                  {language === 'lo' ? 'ອ່ານເພີ່ມເຕີມ' : 'Read Story'}
+                </span>
+              </div>
+
+              {/* Subtle, restrained wave bottom edge in live preview */}
+              <div className="absolute -bottom-px left-0 right-0 w-full overflow-hidden leading-none pointer-events-none z-20">
+                <svg
+                  viewBox="0 0 1440 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="relative block w-full h-2.5 sm:h-3 text-white dark:text-slate-800"
+                  preserveAspectRatio="none"
+                >
+                  <path
+                    d="M 0,14 C 180,22 360,22 540,13 C 660,6 800,6 920,13 C 1080,22 1280,22 1440,14 L 1440,24 L 0,24 Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 1 Bottom Save Row */}
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-end">
             <button
               type="button"
-              onClick={() => setPosterBokeoImageUrl('')}
-              className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 font-bold flex items-center gap-1 cursor-pointer"
+              onClick={onSave}
+              disabled={isSaving}
+              className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{language === 'lo' ? 'ລຶບຮູບ' : 'Remove Image'}</span>
+              {isSaving ? (
+                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              <span>{language === 'lo' ? 'ບັນທຶກການຕັ້ງຄ່າ' : 'Save Settings'}</span>
             </button>
-          )}
-        </div>
-
-        <UnifiedMediaUploader
-          value={posterBokeoImageUrl}
-          onChange={setPosterBokeoImageUrl}
-          language={language}
-          acceptTypes="image/*"
-          maxDimension={1600}
-          maxStringLength={180000}
-          label={
-            language === 'lo'
-              ? 'ເລືອກໄຟລ໌ຮູບພາບ ຫຼື ວາງລິ້ງ URL ຂອງໂພສເຕີ:'
-              : 'Upload Image File or Paste Poster URL:'
-          }
-        />
-
-        {/* Quick Presets */}
-        <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2">
-            {language === 'lo'
-              ? '💡 ຫຼື ເລືອກຈາກຮູບຕົວຢ່າງທີ່ກຽມໄວ້ໃຫ້ (Sample Presets):'
-              : '💡 Or select from sample presets:'}
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            {SAMPLE_POSTERS.map((sample, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setPosterBokeoImageUrl(sample.url)}
-                className={`relative group overflow-hidden border p-1 text-left transition cursor-pointer ${
-                  posterBokeoImageUrl === sample.url
-                    ? 'border-[#cc0000] ring-2 ring-[#cc0000]/20 bg-red-50 dark:bg-red-950/30'
-                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-400'
-                }`}
-              >
-                <img
-                  src={sample.url}
-                  alt={sample.name}
-                  className="w-full h-16 object-cover"
-                  referrerPolicy="no-referrer"
-                />
-                <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block truncate mt-1 px-1">
-                  {sample.name}
-                </span>
-              </button>
-            ))}
           </div>
         </div>
+        )}
       </div>
 
       {/* 2. Poster Background & Appearance Customization matching announcement features */}
-      <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-5">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[#cc0000]" />
-            <h3 className="font-bold text-sm text-slate-800 dark:text-white">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs overflow-hidden">
+        <button
+          type="button"
+          onClick={() => toggleSection('bg_custom')}
+          className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="w-4 h-4 text-[#cc0000] shrink-0" />
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
               {language === 'lo'
                 ? '2. ປັບແຕ່ງພື້ນຫຼັງ ແລະ ໂປສເຕີ (Poster Background Customization)'
                 : '2. Poster Background Customization'}
             </h3>
           </div>
-          <span className="text-xs text-slate-500 font-mono">
-            {language === 'lo' ? 'ປັບຂະໜາດ ແລະ ຄວາມທຶບແສງ' : 'Height & Opacity'}
-          </span>
-        </div>
+          <ChevronDown
+            className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+              isOpen('bg_custom') ? 'rotate-0' : '-rotate-90'
+            }`}
+          />
+        </button>
+
+        {isOpen('bg_custom') && (
+        <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 dark:border-slate-700 space-y-5">
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Height Slider with small drag line 0 to 100 */}
@@ -636,22 +682,57 @@ export const AboutPosterSettingsSection: React.FC<AboutPosterSettingsSectionProp
             </div>
           </div>
         </div>
+
+        {/* Section 2 Bottom Save Row */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={isSaving}
+            className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
+          >
+            {isSaving ? (
+              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Save className="w-3.5 h-3.5" />
+            )}
+            <span>{language === 'lo' ? 'ບັນທຶກການຕັ້ງຄ່າ' : 'Save Settings'}</span>
+          </button>
+        </div>
+        </div>
+        )}
       </div>
 
       {/* 3. Titles & Descriptions with Language Tabs */}
-      <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[#cc0000]" />
-            <h3 className="font-bold text-sm text-slate-800 dark:text-white">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs overflow-hidden">
+        <button
+          type="button"
+          onClick={() => toggleSection('title_desc')}
+          className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="w-4 h-4 text-[#cc0000] shrink-0" />
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
               {language === 'lo'
                 ? '3. ຫົວຂໍ້ ແລະ ເນື້ອຫາ (Title & Description)'
                 : '3. Title & Description'}
             </h3>
           </div>
+          <ChevronDown
+            className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+              isOpen('title_desc') ? 'rotate-0' : '-rotate-90'
+            }`}
+          />
+        </button>
 
-          {/* Language Switcher Tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+        {isOpen('title_desc') && (
+        <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 dark:border-slate-700 space-y-4">
+        {/* Language Switcher Inside Section 3 */}
+        <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+          <span className="text-xs font-extrabold text-slate-700 dark:text-slate-200">
+            {language === 'lo' ? 'ພາສາທີ່ກຳລັງແກ້ໄຂ:' : 'Editing Language:'}
+          </span>
+          <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
             {(['lo', 'th', 'en'] as const).map((lang) => (
               <button
                 key={lang}
@@ -668,7 +749,6 @@ export const AboutPosterSettingsSection: React.FC<AboutPosterSettingsSectionProp
             ))}
           </div>
         </div>
-
         {/* Title Input */}
         <div className="space-y-1">
           <label className="block text-xs font-black text-slate-700 dark:text-slate-300">
@@ -735,47 +815,250 @@ export const AboutPosterSettingsSection: React.FC<AboutPosterSettingsSectionProp
           />
         </div>
 
-        {/* Ministry Origin & Timeline Manager */}
-        {setBokeoTimeline && (
-          <div className="pt-2">
-            <MinistryTimelineManager
-              timeline={bokeoTimeline || []}
-              onChangeTimeline={setBokeoTimeline}
-              language={language}
-              timelineTitle={bokeoTimelineTitle}
-              onChangeTimelineTitle={setBokeoTimelineTitle}
-              timelineTitleEn={bokeoTimelineTitleEn}
-              onChangeTimelineTitleEn={setBokeoTimelineTitleEn}
-              timelineTitleTh={bokeoTimelineTitleTh}
-              onChangeTimelineTitleTh={setBokeoTimelineTitleTh}
-              hideTimeline={hideBokeoTimeline}
-              onToggleHideTimeline={setHideBokeoTimeline}
-            />
-          </div>
-        )}
-
-        {/* Bottom Save Button */}
-        <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex justify-end">
+        {/* Section 3 Bottom Save Row */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-end">
           <button
             type="button"
             onClick={onSave}
             disabled={isSaving}
-            className="px-6 py-2.5 bg-[#cc0000] hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+            className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
           >
             {isSaving ? (
-              <span className="w-4 h-4 border-2 border-white border-t-transparent animate-spin" />
+              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
-              <Save className="w-4 h-4" />
+              <Save className="w-3.5 h-3.5" />
             )}
-            <span>
-              {language === 'lo'
-                ? 'ບັນທຶກຂໍ້ມູນທັງໝົດ'
-                : language === 'th'
-                ? 'บันทึกข้อมูลทั้งหมด'
-                : 'Save All Changes'}
-            </span>
+            <span>{language === 'lo' ? 'ບັນທຶກການຕັ້ງຄ່າ' : 'Save Settings'}</span>
           </button>
         </div>
+        </div>
+        )}
+      </div>
+
+      {/* 4. Ministry Origin & Timeline Manager */}
+      {setBokeoTimeline && (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs overflow-hidden">
+          <button
+            type="button"
+            onClick={() => toggleSection('timeline')}
+            className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5">
+              <Compass className="w-4 h-4 text-[#cc0000] shrink-0" />
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                {language === 'lo'
+                  ? '4. ເສັ້ນທາງພັນທະກິດ (Ministry Origin Story & Timeline)'
+                  : '4. Ministry Origin Story & Timeline'}
+              </h3>
+            </div>
+            <ChevronDown
+              className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+                isOpen('timeline') ? 'rotate-0' : '-rotate-90'
+              }`}
+            />
+          </button>
+
+          {isOpen('timeline') && (
+            <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 dark:border-slate-700 space-y-4">
+              <MinistryTimelineManager
+                timeline={bokeoTimeline || []}
+                onChangeTimeline={setBokeoTimeline}
+                language={language}
+                timelineTitle={bokeoTimelineTitle}
+                onChangeTimelineTitle={setBokeoTimelineTitle}
+                timelineTitleEn={bokeoTimelineTitleEn}
+                onChangeTimelineTitleEn={setBokeoTimelineTitleEn}
+                timelineTitleTh={bokeoTimelineTitleTh}
+                onChangeTimelineTitleTh={setBokeoTimelineTitleTh}
+                hideTimeline={hideBokeoTimeline}
+                onToggleHideTimeline={setHideBokeoTimeline}
+              />
+
+              {/* Section 4 Bottom Save Row */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={onSave}
+                  disabled={isSaving}
+                  className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
+                >
+                  {isSaving ? (
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  <span>{language === 'lo' ? 'ບັນທຶກການຕັ້ງຄ່າ' : 'Save Settings'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. Vision & Mission Settings (Multilingual) */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs overflow-hidden">
+        <button
+          type="button"
+          onClick={() => toggleSection('vision_mission')}
+          className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-base shrink-0">🎯</span>
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+              {language === 'lo' ? '5. ວິໄສທັດ ແລະ ພັນທະກິດ (Vision & Mission Settings)' : '5. Vision & Mission Settings'}
+            </h3>
+          </div>
+          <ChevronDown
+            className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+              isOpen('vision_mission') ? 'rotate-0' : '-rotate-90'
+            }`}
+          />
+        </button>
+
+        {isOpen('vision_mission') && (
+        <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 dark:border-slate-700 space-y-4">
+          {setHideVisionMission && (
+            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                {language === 'lo' ? 'ສະຖານະການສະແດງຜົນ (Visibility):' : 'Section Visibility:'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setHideVisionMission(!hideVisionMission)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition border cursor-pointer ${
+                  hideVisionMission
+                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800'
+                    : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800'
+                }`}
+              >
+                {hideVisionMission ? (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5" />
+                    <span>{language === 'lo' ? 'ຊ້ອນຢູ່ (Hidden)' : 'Hidden'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>{language === 'lo' ? 'ກຳລັງສະແດງ (Visible)' : 'Visible'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                {language === 'lo' ? '1. ວິໄສທັດ (Vision) *' : '1. Vision Statement *'}
+              </span>
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                {(['la', 'tha', 'en'] as const).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => setVisionLang(l)}
+                    className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
+                      visionLang === l
+                        ? 'bg-[#cc0000] text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <textarea
+              rows={3}
+              value={
+                visionLang === 'la'
+                  ? (vision || '')
+                  : visionLang === 'tha'
+                  ? (visionTh || '')
+                  : (visionEn || '')
+              }
+              onChange={(e) => {
+                const val = e.target.value;
+                if (visionLang === 'la' && setVision) setVision(val);
+                else if (visionLang === 'tha' && setVisionTh) setVisionTh(val);
+                else if (visionLang === 'en' && setVisionEn) setVisionEn(val);
+              }}
+              placeholder={
+                visionLang === 'la'
+                  ? 'ສ້າງສາວົກ ແລະ ຂະຫຍາຍແຜ່ນດິນຂອງພຣະເຈົ້າ...'
+                  : visionLang === 'tha'
+                  ? 'สร้างสาวกและขยายแผ่นดินของพระเจ้า...'
+                  : 'Disciple nations and expand the Kingdom of God...'
+              }
+              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none"
+            />
+          </div>
+
+          <div className="space-y-2 pt-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                {language === 'lo' ? '2. ພັນທະກິດ (Mission - 1 ຂໍ້ຕໍ່ 1 ແຖວ) *' : '2. Mission Items (1 item per line) *'}
+              </span>
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                {(['la', 'tha', 'en'] as const).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => setMissionLang(l)}
+                    className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
+                      missionLang === l
+                        ? 'bg-[#cc0000] text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <textarea
+              rows={4}
+              value={
+                missionLang === 'la'
+                  ? (mission || '')
+                  : missionLang === 'tha'
+                  ? (missionTh || '')
+                  : (missionEn || '')
+              }
+              onChange={(e) => {
+                const val = e.target.value;
+                if (missionLang === 'la' && setMission) setMission(val);
+                else if (missionLang === 'tha' && setMissionTh) setMissionTh(val);
+                else if (missionLang === 'en' && setMissionEn) setMissionEn(val);
+              }}
+              placeholder={
+                missionLang === 'la'
+                  ? 'ປະກາດຂ່າວປະເສີດ...\nຝຶກອົບຮົມຜູ້ນຳ...'
+                  : missionLang === 'tha'
+                  ? 'ประกาศข่าวประเสริฐ...\nฝึกอบรมผู้นำ...'
+                  : 'Proclaim the Gospel...\nTrain local leaders...'
+              }
+              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none"
+            />
+          </div>
+
+          {/* Section 5 Bottom Save Row */}
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-end">
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={isSaving}
+              className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
+            >
+              {isSaving ? (
+                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              <span>{language === 'lo' ? 'ບັນທຶກການຕັ້ງຄ່າ' : 'Save Settings'}</span>
+            </button>
+          </div>
+        </div>
+        )}
       </div>
     </div>
   );

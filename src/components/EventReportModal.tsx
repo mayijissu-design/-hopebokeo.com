@@ -653,7 +653,7 @@ const EventReportModalContent: React.FC<EventReportModalProps> = ({
               </div>
             </div>
 
-            {/* Main Event Attached Documents & Media */}
+            {/* Main Event Attached Documents & Video (Do NOT display main event images/cover photo at the top) */}
             {(() => {
               const mainDocs: string[] = [];
               if (Array.isArray(currentEvent.docUrls) && currentEvent.docUrls.length > 0) {
@@ -665,29 +665,16 @@ const EventReportModalContent: React.FC<EventReportModalProps> = ({
                 mainDocs.unshift(currentEvent.docUrl.trim());
               }
 
-              // Inside event modal, do NOT display the cover photo (ຫ້ອງອີເວັນເມື່ອກົດເຂົ້າໄປແລ້ວບໍ່ໃຫ້ສະແດງຮູບປົກ)
-              const coverUrl = (currentEvent.imageUrl || '').trim();
-              const mainImages: string[] = [];
-              if (Array.isArray(currentEvent.imageUrls) && currentEvent.imageUrls.length > 0) {
-                currentEvent.imageUrls.forEach((img) => {
-                  const trimmed = (img || '').trim();
-                  if (trimmed && trimmed !== coverUrl && !mainImages.includes(trimmed)) {
-                    mainImages.push(trimmed);
-                  }
-                });
-              }
-
               const hasMainDoc = mainDocs.length > 0;
-              const hasMainImages = mainImages.length > 0;
               const hasMainVideo = Boolean(currentEvent.videoUrl && currentEvent.videoUrl.trim());
 
-              if (!hasMainDoc && !hasMainImages && !hasMainVideo) return null;
+              if (!hasMainDoc && !hasMainVideo) return null;
 
               return (
                 <div className="space-y-3 pt-1">
                   <ReportDocumentViewer
                     docUrls={mainDocs}
-                    imageUrls={mainImages}
+                    imageUrls={[]}
                     videoUrl={currentEvent.videoUrl}
                     title={displayTitle}
                     language={language}

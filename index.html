@@ -5,8 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hope Bokeo</title>
 
+    <meta name="theme-color" content="#cc0000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="HOPE BOKEO" />
+
     <link rel="icon" type="image/svg+xml" href="/hb-logo.svg" />
-    <link rel="apple-touch-icon" href="/hb-logo.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Google Font for Calligraphy Accent -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet">
 
     <!-- Meta Description -->
     <meta name="description" content="Hope Bokeo community portal with Google Sheets data integration" />
@@ -32,9 +44,21 @@
     <meta name="twitter:title" content="Hope Bokeo Ministry - ພັນທະກິດໂຮບບໍ່ແກ້ວ" />
     <meta name="twitter:description" content="Platform for Christian community statistics, church updates, and ministry outreach in Bokeo, Laos." />
 
-    <!-- Dark mode persistence script -->
+    <!-- Dark mode persistence & harmless notification filter script -->
     <script>
       (function() {
+        // Prevent harmless ResizeObserver notification loops from throwing unhandled errors
+        window.addEventListener('error', function(e) {
+          if (e && e.message && (
+            e.message.indexOf('ResizeObserver loop completed with undelivered notifications') !== -1 ||
+            e.message.indexOf('ResizeObserver loop limit exceeded') !== -1
+          )) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return false;
+          }
+        });
+
         try {
           var saved = localStorage.getItem('hb_dark_mode');
           if (saved === 'true' || (saved === null && window.matchMedia('(prefers-color-scheme: dark)').matches)) {

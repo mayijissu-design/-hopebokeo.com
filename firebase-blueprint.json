@@ -62,5 +62,23 @@
         "data": { "type": "object" }
       }
     }
+  },
+  "firestore": {
+    "/villages/{villageId}": {
+      "schema": "villages",
+      "description": "Church and village records"
+    },
+    "/events/{eventId}": {
+      "schema": "events",
+      "description": "Ministry events and reports"
+    },
+    "/teams/{teamId}": {
+      "schema": "teams",
+      "description": "Ministry team members"
+    },
+    "/app_config/{configId}": {
+      "schema": "app_config",
+      "description": "Global home poster and donation settings"
+    }
   }
 }

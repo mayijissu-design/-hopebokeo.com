@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Home, PieChart as PieChartIcon, Users, Lock, Sun, Moon, Church, Menu, X, RefreshCw, Globe, Check } from 'lucide-react';
+import { Home, PieChart as PieChartIcon, Users, Lock, Sun, Moon, Menu, X, RefreshCw, Globe, Check, ChevronDown } from 'lucide-react';
 import { Language } from '../types';
 import { HbLogo } from './HbLogo';
 
@@ -47,45 +47,54 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const languagesList: { id: Language; label: string; flag: string; nativeName: string }[] = [
-    { id: 'lo', label: 'Lao', flag: '🇱🇦', nativeName: 'ລາວ' },
-    { id: 'th', label: 'Thai', flag: '🇹🇭', nativeName: 'ไทย' },
-    { id: 'en', label: 'English', flag: '🇬🇧', nativeName: 'ENG' },
+  const languagesList: { id: Language; label: string; flag: string; nativeName: string; code: string }[] = [
+    { id: 'en', label: 'English', flag: '🇬🇧', nativeName: 'ENG', code: 'EN' },
+    { id: 'lo', label: 'Lao', flag: '🇱🇦', nativeName: 'ລາວ', code: 'LAO' },
+    { id: 'th', label: 'Thai', flag: '🇹🇭', nativeName: 'ไทย', code: 'TH' },
   ];
+
+  const currentLangObj = languagesList.find((l) => l.id === language) || languagesList[0];
 
   const navItems = [
     {
       id: 'home',
       label: language === 'lo' ? 'ໜ້າຫຼັກ' : language === 'th' ? 'หน้าหลัก' : 'Home',
       icon: Home,
+      action: () => {
+        setActiveTab('home');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
     },
     {
       id: 'dashboard',
       label: language === 'lo' ? 'ຂໍ້ມູນເຊິງເລິກ' : language === 'th' ? 'แดชบอร์ดข้อมูล' : 'Insights',
       icon: PieChartIcon,
+      action: () => setActiveTab('dashboard'),
     },
     {
       id: 'about',
       label: language === 'lo' ? 'ກ່ຽວກັບພວກເຮົາ' : language === 'th' ? 'เกี่ยวกับเรา' : 'About Us',
       icon: Users,
+      action: () => setActiveTab('about'),
     },
     {
       id: 'admin',
-      label: language === 'lo' ? 'ຫ້ອງແອັດມິນ' : language === 'th' ? 'ห้องผู้ดูแลระบบ' : 'Admin',
+      label: language === 'lo' ? 'ແອັດມິນ' : language === 'th' ? 'แอดมิน' : 'Admin',
       icon: Lock,
       iconColor: 'text-amber-500',
+      action: () => setActiveTab('admin'),
     },
   ];
 
   return (
-    <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-40 shadow-sm transition-colors w-full">
-      <div className="w-full pl-2 sm:pl-4 lg:pl-6 pr-1 sm:pr-2 lg:pr-3 h-16 flex items-center justify-between gap-2">
-        {/* Logo & Title - Stable, no scale or bounce on tap */}
-        <div className="flex items-center gap-2 cursor-pointer shrink-0 select-none" onClick={() => setActiveTab('home')}>
-          <HbLogo logoUrl={logoUrl} className="h-9 md:h-12 w-auto text-[#ee1c25] leading-none shrink-0" />
+    <header className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md sticky top-0 z-40 transition-colors w-full">
+      <div className="w-full pl-3 sm:pl-6 lg:pl-8 pr-3 sm:pr-6 lg:pr-8 h-16 sm:h-18 flex items-center justify-between gap-3">
+        {/* Logo & Title matching exact mockup design */}
+        <div className="flex items-center gap-2.5 cursor-pointer shrink-0 select-none group" onClick={() => setActiveTab('home')}>
+          <HbLogo logoUrl={logoUrl} className="h-9 md:h-11 w-auto text-[#ee1c25] leading-none shrink-0" />
           <div className="flex flex-col justify-center select-none">
             <div className="flex items-center gap-1.5">
-              <span className="font-black text-slate-900 dark:text-white text-sm md:text-lg leading-none tracking-wider uppercase">
+              <span className="font-black text-slate-900 dark:text-white text-base md:text-xl leading-none tracking-tight uppercase">
                 HOPE
               </span>
               {isSyncing && (
@@ -94,48 +103,54 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               )}
             </div>
-            <span className="font-black text-[#cc0000] text-[10px] md:text-sm leading-tight tracking-widest uppercase">
+            <span className="font-black text-[#cc0000] text-xs md:text-sm leading-tight tracking-wider uppercase">
               BOKEO
             </span>
           </div>
         </div>
 
-        {/* Desktop Navigation Tabs (Hidden on mobile) */}
-        <nav className="hidden md:flex items-center gap-1 lg:gap-2">
+        {/* Navigation Tabs (Visible on tablet, desktop and preview pane) */}
+        <nav className="hidden sm:flex items-center gap-1 md:gap-1.5 xl:gap-2">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activeTab === item.id;
+            const isActive = activeTab === item.id || (item.id === 'home' && activeTab === 'home');
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-1.5 px-3 py-2 text-xs lg:text-sm transition whitespace-nowrap border-b-2 rounded-none ${
+                onClick={item.action}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer rounded-lg relative ${
                   isActive
-                    ? 'border-[#cc0000] text-[#cc0000] dark:text-red-400 font-black'
-                    : 'border-transparent text-slate-700 dark:text-slate-300 hover:text-[#cc0000] dark:hover:text-red-400 font-bold'
+                    ? 'text-[#cc0000] dark:text-red-400 font-extrabold'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-[#cc0000] dark:hover:text-red-400 font-semibold'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-[#cc0000] dark:text-red-400' : (item.iconColor || '')}`} />
+                <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isActive ? 'text-[#cc0000] dark:text-red-400' : (item.iconColor || 'text-slate-500 dark:text-slate-400')}`} />
                 <span>{item.label}</span>
+                {isActive && (
+                  <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#cc0000] rounded-full" />
+                )}
               </button>
             );
           })}
         </nav>
 
-        {/* Utilities at Far Right: Language (Globe Icon Only), Theme Toggle & Mobile Menu Hamburger */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Language Selector: Globe Icon ONLY as requested */}
+        {/* Right Controls: Language Dropdown, Dark Mode & Menu */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+
+          {/* Language Selector: Globe Icon + Code (e.g., "EN ▾") */}
           <div className="relative" ref={langMenuRef}>
             <button
               onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
-              className="w-9 h-9 rounded-none bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition shadow-xs text-slate-800 dark:text-slate-100"
+              className="h-9 px-2.5 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition shadow-xs text-slate-800 dark:text-slate-100 cursor-pointer font-bold text-xs"
               title="Change Language / ປ່ຽນພາສາ"
             >
-              <Globe className="w-4 h-4 text-[#cc0000]" />
+              <Globe className="w-3.5 h-3.5 text-[#cc0000]" />
+              <span className="text-[11px] font-bold">{currentLangObj.code}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
             </button>
 
             {isLangMenuOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-none shadow-xl py-2 z-50 animate-fade-in divide-y divide-slate-100 dark:divide-slate-800">
+              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-50 animate-fade-in divide-y divide-slate-100 dark:divide-slate-800">
                 <div className="px-3.5 py-1 text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">
                   {language === 'lo' ? 'ເລືອກພາສາ' : language === 'th' ? 'เลือกภาษา' : 'Select Language'}
                 </div>
@@ -155,7 +170,7 @@ export const Header: React.FC<HeaderProps> = ({
                           setLanguage(langItem.id);
                           setIsLangMenuOpen(false);
                         }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-bold transition rounded-none ${
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-bold transition rounded-lg ${
                           isSelected
                             ? 'bg-red-50 dark:bg-red-950/40 text-[#cc0000] dark:text-red-400 font-black'
                             : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -177,7 +192,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Theme Toggle Button */}
           <button
             onClick={() => setDarkMode(!darkMode)}
-            className="w-9 h-9 rounded-none bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 transition hover:bg-slate-200 dark:hover:bg-slate-700 shadow-xs text-slate-800 dark:text-slate-100"
+            className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 transition hover:bg-slate-200 dark:hover:bg-slate-700 shadow-xs text-slate-800 dark:text-slate-100 cursor-pointer"
             title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
             {darkMode ? (
@@ -187,10 +202,10 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* Mobile Menu Hamburger Button (3-lines) */}
+          {/* Mobile Menu Hamburger Button (3-lines) - only on small phones */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden w-9 h-9 rounded-none bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 transition hover:bg-slate-200 dark:hover:bg-slate-700 shadow-xs text-slate-800 dark:text-slate-100"
+            className="sm:hidden w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 transition hover:bg-slate-200 dark:hover:bg-slate-700 shadow-xs text-slate-800 dark:text-slate-100 cursor-pointer"
             title="Menu / ເມນູ"
           >
             <Menu className="w-5 h-5 text-slate-800 dark:text-slate-200" />
@@ -203,12 +218,12 @@ export const Header: React.FC<HeaderProps> = ({
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 md:hidden animate-fade-in"
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 sm:hidden animate-fade-in"
             onClick={() => setIsMobileMenuOpen(false)}
           />
 
           {/* Right-aligned Vertical Navigation Drawer */}
-          <div className="fixed top-0 right-0 h-full w-72 bg-white dark:bg-slate-900 shadow-2xl z-50 p-5 border-l border-slate-200 dark:border-slate-800 flex flex-col justify-between md:hidden animate-fade-in transition-all rounded-none">
+          <div className="fixed top-0 right-0 h-full w-72 bg-white dark:bg-slate-900 shadow-2xl z-50 p-5 border-l border-slate-200 dark:border-slate-800 flex flex-col justify-between sm:hidden animate-fade-in transition-all rounded-l-2xl">
             <div className="space-y-6">
               {/* Drawer Header */}
               <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
@@ -220,7 +235,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
                 <button
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className="w-8 h-8 rounded-none bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition"
+                  className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -238,7 +253,7 @@ export const Header: React.FC<HeaderProps> = ({
                         setActiveTab(item.id);
                         setIsMobileMenuOpen(false);
                       }}
-                      className={`flex items-center gap-3 px-3.5 py-3 rounded-none text-sm font-bold transition text-left ${
+                      className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-bold transition text-left ${
                         isActive
                           ? 'bg-red-50 dark:bg-red-950/40 text-[#cc0000] dark:text-red-400 font-black border-l-4 border-[#cc0000]'
                           : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -253,8 +268,20 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Drawer Footer */}
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
               <p className="font-black text-slate-600 dark:text-slate-400 tracking-wider">HOPE BOKEO</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('admin');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition text-[11px] font-medium cursor-pointer"
+                title="Admin Portal"
+              >
+                <Lock className="w-3 h-3 text-slate-400" />
+                <span>{language === 'lo' ? 'ແອັດມິນ' : language === 'th' ? 'แอดมิน' : 'Admin'}</span>
+              </button>
             </div>
           </div>
         </>

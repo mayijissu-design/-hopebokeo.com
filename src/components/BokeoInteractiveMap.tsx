@@ -173,14 +173,21 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
       map.invalidateSize();
     }, 200);
 
+    let resizeTimer: number | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      map.invalidateSize();
+      if (resizeTimer) cancelAnimationFrame(resizeTimer);
+      resizeTimer = window.requestAnimationFrame(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      });
     });
     if (mapContainerRef.current) {
       resizeObserver.observe(mapContainerRef.current);
     }
 
     return () => {
+      if (resizeTimer) cancelAnimationFrame(resizeTimer);
       resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
@@ -275,7 +282,7 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
         html: `
           <div class="relative flex flex-col items-center group cursor-pointer -translate-x-1/2 -translate-y-full select-none ${pinPulse}">
             <!-- Pin Header Label Badge (Visible on hover or if selected/origin/dest) -->
-            <div class="px-2 py-0.5 rounded-none text-[10px] font-bold shadow-md border border-white/80 whitespace-nowrap mb-0.5 transition-all pointer-events-none absolute bottom-full z-30 ${
+            <div class="px-2 py-0.5 rounded-full text-[10px] font-bold shadow-md border border-white/80 whitespace-nowrap mb-0.5 transition-all pointer-events-none absolute bottom-full z-30 ${
               isSelected || isOrigin || isDest
                 ? 'opacity-100 scale-100'
                 : 'opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100'
@@ -457,13 +464,13 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
   ]);
 
   return (
-    <div className="w-full aspect-square max-h-[330px] sm:max-h-none sm:aspect-auto sm:h-[460px] relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-inner group">
+    <div className="w-full h-full min-h-[360px] relative overflow-hidden shadow-inner group">
       {/* Interactive Map Canvas */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
       {/* Sliding Bottom Guidance Text (Slides up on click, automatically fades out after 4 seconds) */}
       <div
-        className={`absolute bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-[1050] pointer-events-none transition-all duration-500 ease-out max-w-[92%] sm:max-w-max ${
+        className={`absolute bottom-16 sm:bottom-5 left-1/2 -translate-x-1/2 z-[1050] pointer-events-none transition-all duration-500 ease-out max-w-[92%] sm:max-w-max ${
           showToast && toastMessage
             ? 'opacity-100 translate-y-0 scale-100'
             : 'opacity-0 translate-y-4 scale-95 pointer-events-none'
@@ -475,16 +482,16 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
         </div>
       </div>
 
-      {/* Google Maps Layer Switcher & Floating Controls at Bottom-Left (Compact & Sized Down) */}
+      {/* Google Maps Layer Switcher & Floating Controls at Bottom-Left */}
       <div
-        className="absolute bottom-3 left-3 z-[1000] flex items-end gap-2 select-none"
+        className="absolute bottom-5 left-4 z-[1000] flex items-center gap-2.5 select-none"
         onMouseLeave={() => setIsLayersOpen(false)}
       >
         {onChangeMapType && (
           <div className="relative">
             {/* Expanded Layer Selection Drawer */}
             {isLayersOpen && (
-              <div className="absolute bottom-full left-0 mb-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 flex items-center gap-1.5 animate-fade-in">
+              <div className="absolute bottom-full left-0 mb-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-1.5 rounded-none shadow-xl border border-slate-200 dark:border-slate-800 flex items-center gap-1.5 animate-fade-in">
                 {/* Satellite Option */}
                 <button
                   type="button"
@@ -492,14 +499,14 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
                     onChangeMapType('satellite');
                     setIsLayersOpen(false);
                   }}
-                  className={`flex flex-col items-center gap-0.5 p-1 rounded-lg transition-all cursor-pointer group/sat ${
+                  className={`flex flex-col items-center gap-0.5 p-1 rounded-none transition-all cursor-pointer group/sat ${
                     mapType === 'satellite'
                       ? 'ring-2 ring-blue-500 bg-blue-50/70 dark:bg-blue-950/50'
                       : 'hover:bg-slate-100 dark:hover:bg-slate-800 opacity-80 hover:opacity-100'
                   }`}
                   title={language === 'lo' ? 'ດາວທຽມ (Satellite)' : 'Satellite'}
                 >
-                  <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 shadow-2xs">
+                  <div className="relative w-10 h-10 rounded-none overflow-hidden border border-slate-300 dark:border-slate-700 shadow-2xs">
                     <img
                       src={SATELLITE_THUMBNAIL}
                       alt="Satellite"
@@ -523,14 +530,14 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
                     onChangeMapType('roadmap');
                     setIsLayersOpen(false);
                   }}
-                  className={`flex flex-col items-center gap-0.5 p-1 rounded-lg transition-all cursor-pointer group/road ${
+                  className={`flex flex-col items-center gap-0.5 p-1 rounded-none transition-all cursor-pointer group/road ${
                     mapType === 'roadmap'
                       ? 'ring-2 ring-blue-500 bg-blue-50/70 dark:bg-blue-950/50'
                       : 'hover:bg-slate-100 dark:hover:bg-slate-800 opacity-80 hover:opacity-100'
                   }`}
                   title={language === 'lo' ? 'ຖະໜົນ (Roadmap)' : 'Roadmap'}
                 >
-                  <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 shadow-2xs">
+                  <div className="relative w-10 h-10 rounded-none overflow-hidden border border-slate-300 dark:border-slate-700 shadow-2xs">
                     <img
                       src={ROADMAP_THUMBNAIL}
                       alt="Roadmap"
@@ -549,13 +556,13 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
               </div>
             )}
 
-            {/* Main Google Maps Square Thumbnail Button - Compact & Sized Down */}
+            {/* Main Google Maps Square Thumbnail Button */}
             <div className="relative group/main">
               <button
                 type="button"
                 onClick={() => onChangeMapType(mapType === 'satellite' ? 'roadmap' : 'satellite')}
                 onMouseEnter={() => setIsLayersOpen(true)}
-                className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-lg overflow-hidden border border-white dark:border-slate-800 shadow-md shadow-black/25 cursor-pointer select-none transition-all duration-200 hover:scale-105 active:scale-95 block focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-xl overflow-hidden border-2 border-white dark:border-slate-800 shadow-lg shadow-black/30 cursor-pointer select-none transition-all duration-200 hover:scale-105 active:scale-95 block focus:outline-none focus:ring-2 focus:ring-blue-400"
                 title={
                   mapType === 'satellite'
                     ? (language === 'lo' ? 'ປ່ຽນເປັນ ແຜນທີ່ຖະໜົນ (Roadmap)' : 'Switch to Roadmap')
@@ -567,8 +574,8 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
                   alt={mapType === 'satellite' ? 'Roadmap' : 'Satellite'}
                   className="w-full h-full object-cover select-none pointer-events-none transition duration-500 group-hover/main:scale-110"
                 />
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-1 pb-0.5 px-0.5 flex items-center justify-center pointer-events-none">
-                  <span className="text-white text-[7px] sm:text-[8px] font-bold tracking-tight drop-shadow-xs select-none">
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-1.5 pb-0.5 px-0.5 flex items-center justify-center pointer-events-none">
+                  <span className="text-white text-[8px] sm:text-[9px] font-bold tracking-tight drop-shadow-xs select-none leading-none">
                     {mapType === 'satellite' ? 'Map' : 'Sat'}
                   </span>
                 </div>
@@ -581,24 +588,24 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
                   e.stopPropagation();
                   setIsLayersOpen((prev) => !prev);
                 }}
-                className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-full shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center transition hover:scale-110 cursor-pointer"
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-full shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center transition hover:scale-110 cursor-pointer z-10"
                 title={language === 'lo' ? 'ເລືອກຊັ້ນແຜນທີ່' : 'Layers'}
               >
-                <Layers className="w-2 h-2 text-slate-700 dark:text-slate-300" />
+                <Layers className="w-2.5 h-2.5 text-slate-700 dark:text-slate-300" />
               </button>
             </div>
           </div>
         )}
 
-        {/* Google Maps Styled Distance Measurement Tool - Compact Sizing */}
+        {/* Google Maps Styled Distance Measurement Tool */}
         {onToggleDistanceMode && (
           <button
             type="button"
             onClick={onToggleDistanceMode}
-            className={`h-8 sm:h-9 px-2 sm:px-2.5 rounded-lg backdrop-blur-md shadow-md border transition-all duration-200 flex items-center gap-1.5 cursor-pointer select-none active:scale-95 ${
+            className={`h-10 sm:h-11 px-3 sm:px-3.5 rounded-xl backdrop-blur-md shadow-lg border transition-all duration-200 flex items-center gap-1.5 cursor-pointer select-none active:scale-95 ${
               isDistanceMode
-                ? 'bg-blue-600 dark:bg-blue-600 text-white border-blue-400 ring-1 ring-blue-400/40 shadow-blue-500/25'
-                : 'bg-white/95 dark:bg-slate-900/95 text-slate-700 dark:text-slate-200 border-white dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
+                ? 'bg-blue-600 dark:bg-blue-600 text-white border-blue-400 ring-2 ring-blue-400/40 shadow-blue-500/25'
+                : 'bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-100 border-white dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800'
             }`}
             title={
               isDistanceMode
@@ -606,12 +613,12 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
                 : (language === 'lo' ? 'ວັດແທກໄລຍະທາງຕາມເສັ້ນທາງຈິງ' : 'Measure Road Distance')
             }
           >
-            <Ruler className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-            <span className="text-[10px] sm:text-[11px] font-bold">
+            <Ruler className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="text-xs sm:text-[13px] font-bold">
               {language === 'lo' ? 'ວັດແທກ' : 'Measure'}
             </span>
             {isDistanceMode && (
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
             )}
           </button>
         )}
@@ -621,10 +628,10 @@ export const BokeoInteractiveMap: React.FC<BokeoInteractiveMapProps> = ({
           <button
             type="button"
             onClick={onResetDistance}
-            className="h-8 sm:h-9 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] sm:text-[11px] shadow-md transition flex items-center gap-1 cursor-pointer active:scale-95"
+            className="h-10 sm:h-11 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs sm:text-[13px] shadow-lg transition flex items-center gap-1.5 cursor-pointer active:scale-95"
             title={language === 'lo' ? 'ເລີ່ມວັດແທກໃໝ່' : 'New Measurement'}
           >
-            <RotateCcw className="w-3 h-3" />
+            <RotateCcw className="w-3.5 h-3.5" />
             <span>{language === 'lo' ? 'ໃໝ່' : 'Reset'}</span>
           </button>
         )}

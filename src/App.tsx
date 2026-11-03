@@ -12,8 +12,10 @@ import { TeamModal } from './components/TeamModal';
 import { AiAssistant } from './components/AiAssistant';
 import { AutoUpdateListener } from './components/AutoUpdateListener';
 import { HbLogo } from './components/HbLogo';
-import { Village, EventData, TeamMember, HomePoster, DonationInfo, Language } from './types';
-import { Sparkles, X, Loader2, WifiOff } from 'lucide-react';
+import { NetworkStatusBar } from './components/NetworkStatusBar';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { Village, EventData, TeamMember, HomePoster, DonationInfo, Language, BankAccount } from './types';
+import { Sparkles, X, Loader2, WifiOff, Lock } from 'lucide-react';
 import { db, collection, doc, onSnapshot } from './lib/firebase';
 import {
   saveVillageToFirestore,
@@ -26,6 +28,7 @@ import {
   saveDonationInfoToFirestore,
   initialDefaultData,
 } from './lib/firestore-service';
+import initialDefaultDonationBankAccounts from './data/donationBankAccounts.json';
 import {
   getInitialActiveTab,
   persistActiveTab,
@@ -78,13 +81,16 @@ export default function App() {
   const [activeTab, setActiveTabState] = useState<string>(() => getInitialActiveTab());
 
   // Function to navigate tabs while preserving scroll & history
-  const setActiveTab = useCallback((newTab: string) => {
+  const setActiveTab = useCallback((newTab: string, options?: { skipScrollRestore?: boolean }) => {
     setActiveTabState((prevTab) => {
       if (prevTab === newTab) return prevTab;
       saveCurrentTabScroll(prevTab);
       persistActiveTab(newTab, true);
-      const targetScroll = getSavedTabScroll(newTab);
-      restoreScrollPosition(targetScroll);
+      const hasPendingScrollTarget = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('hb_scroll_target');
+      if (!options?.skipScrollRestore && !hasPendingScrollTarget) {
+        const targetScroll = getSavedTabScroll(newTab);
+        restoreScrollPosition(targetScroll);
+      }
       // Auto-lock admin rooms when switching to any other tab
       if (newTab !== 'admin') {
         try {
@@ -328,16 +334,48 @@ export default function App() {
   const [homePoster, setHomePoster] = useState<HomePoster | undefined>(() => {
     try {
       const cached = localStorage.getItem('hb_cached_home_poster');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        return JSON.parse(cached);
+      }
     } catch {}
     return (initialDefaultData?.homePoster as HomePoster) || undefined;
   });
   const [donationInfo, setDonationInfo] = useState<DonationInfo | undefined>(() => {
+    const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
     try {
       const cached = localStorage.getItem('hb_cached_donation_info');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed) {
+          const accounts = (parsed.bankAccounts && parsed.bankAccounts.length > 0)
+            ? parsed.bankAccounts.map((acc: any, idx: number) => {
+                const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+                const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+                return {
+                  ...acc,
+                  qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+                };
+              })
+            : defaults;
+          return { ...parsed, bankAccounts: accounts };
+        }
+      }
     } catch {}
-    return (initialDefaultData?.donationInfo as DonationInfo) || undefined;
+    const fallback = (initialDefaultData?.donationInfo as DonationInfo) || undefined;
+    if (fallback) {
+      const accounts = (fallback.bankAccounts && fallback.bankAccounts.length > 0)
+        ? fallback.bankAccounts.map((acc: any, idx: number) => {
+            const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+            const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+            return {
+              ...acc,
+              qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+            };
+          })
+        : defaults;
+      return { ...fallback, bankAccounts: accounts };
+    }
+    return fallback;
   });
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -446,8 +484,20 @@ export default function App() {
             try { localStorage.setItem('hb_cached_home_poster', JSON.stringify(data.homePoster)); } catch {}
           }
           if (data.donationInfo) {
-            setDonationInfo(data.donationInfo);
-            try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(data.donationInfo)); } catch {}
+            const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
+            const accounts = (data.donationInfo.bankAccounts && data.donationInfo.bankAccounts.length > 0)
+              ? data.donationInfo.bankAccounts.map((acc: any, idx: number) => {
+                  const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+                  const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+                  return {
+                    ...acc,
+                    qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+                  };
+                })
+              : defaults;
+            const cleanDonationInfo = { ...data.donationInfo, bankAccounts: accounts };
+            setDonationInfo(cleanDonationInfo);
+            try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(cleanDonationInfo)); } catch {}
           }
         }
       }
@@ -499,32 +549,26 @@ export default function App() {
     }
   };
 
-  // Offline Mode & Persistence State
-  const [isOffline, setIsOffline] = useState<boolean>(
-    typeof navigator !== 'undefined' ? !navigator.onLine : false
-  );
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  // Real-time network status with automatic synchronization when signal is restored
+  const {
+    isOnline,
+    wasOffline,
+    isSyncing: isNetworkSyncing,
+    lastSyncTime,
+    triggerManualSync,
+  } = useNetworkStatus(fetchMinistryData);
+
+  const [isLocalSyncing, setIsLocalSyncing] = useState<boolean>(false);
+  const setIsSyncing = setIsLocalSyncing;
+  const isSyncing = isLocalSyncing || isNetworkSyncing;
 
   // Helper to trigger syncing indicator animation
   const triggerSyncIndicator = () => {
-    setIsSyncing(true);
+    setIsLocalSyncing(true);
     setTimeout(() => {
-      setIsSyncing(false);
+      setIsLocalSyncing(false);
     }, 1200);
   };
-
-  useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
 
   // Real-time multi-user Firestore listener subscription
   useEffect(() => {
@@ -946,7 +990,7 @@ export default function App() {
         !hasCustomBgColor && !hasCustomBgImage
           ? darkMode
             ? 'bg-slate-950'
-            : 'bg-slate-50'
+            : 'bg-[#faf8f5]'
           : hasCustomBgImage
           ? 'bg-transparent'
           : ''
@@ -1015,22 +1059,18 @@ export default function App() {
         logoUrl={homePoster?.logoUrl}
       />
 
-      {/* Offline Status Notification Banner — Shown ONLY when genuinely offline */}
-      {isOffline && (
-        <div className="bg-amber-500/15 dark:bg-amber-500/20 border-b border-amber-500/30 px-3 py-1 text-center text-[10px] sm:text-xs font-semibold text-amber-900 dark:text-amber-200 flex items-center justify-center gap-2 z-30 transition animate-fade-in">
-          <WifiOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-          <span>
-            {language === 'lo'
-              ? 'ໂໝດອອຟໄລນ໌ (Offline) — ຂໍ້ມູນທີ່ອັບເດດຈະຊິງຄ໌ອັດໂຕໂນມັດເມື່ອມີສັນຍານອິນເຕີເນັດ.'
-              : language === 'th'
-              ? 'โหมดออฟไลน์ (Offline) — ข้อมูลที่อัปเดตจะซิงค์อัตโนมัติเมื่อเชื่อมต่ออินเทอร์เน็ต'
-              : 'Offline Mode — Updates will sync automatically when back online.'}
-          </span>
-        </div>
-      )}
+      {/* Network Status & Automatic Real-Time Synchronization Banner */}
+      <NetworkStatusBar
+        isOnline={isOnline}
+        wasOffline={wasOffline}
+        isSyncing={isSyncing}
+        lastSyncTime={lastSyncTime}
+        language={language}
+        onManualSync={triggerManualSync}
+      />
 
       {/* Main Container — Full width fluid responsive across phone, tablet, and widescreen */}
-      <main className={`flex-1 w-full max-w-full ${activeTab === 'home' ? 'p-0 space-y-0' : 'px-0.5 sm:px-1.5 md:px-3 lg:px-4 py-2.5 sm:py-4 space-y-3 sm:space-y-4'} relative overflow-x-hidden`}>
+      <main className={`flex-1 w-full max-w-full ${activeTab === 'home' || activeTab === 'about' || activeTab === 'dashboard' ? 'p-0 space-y-0' : activeTab === 'admin' ? 'px-1 sm:px-2 md:px-3 lg:px-4 py-1.5 sm:py-3 space-y-2 sm:space-y-3' : 'px-0.5 sm:px-1.5 md:px-3 lg:px-4 py-2 sm:py-3.5 space-y-2.5 sm:space-y-3.5'} relative overflow-x-hidden`}>
         {/* Global Filter Panel (Shown on Dashboard only) */}
         {activeTab === 'dashboard' && (
           <FilterPanel
@@ -1051,12 +1091,13 @@ export default function App() {
             setEndDate={setEndDate}
             onResetFilters={handleResetFilters}
             language={language}
+            homePoster={homePoster}
           />
         )}
 
         {/* Loading Indicator */}
         {isLoading && (
-          <div className="flex items-center justify-center p-8 bg-white dark:bg-slate-800 rounded-none shadow-sm border border-slate-100 dark:border-slate-700 text-xs font-semibold text-slate-500 gap-2">
+          <div className="flex items-center justify-center p-8 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 text-xs font-semibold text-slate-500 gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-[#cc0000]" />
             <span>
               {language === 'lo'
@@ -1070,10 +1111,27 @@ export default function App() {
         {activeTab === 'home' && (
           <HomeTab
             events={events}
+            villages={villages}
             homePoster={homePoster}
             donationInfo={donationInfo}
             language={language}
+            onSaveHomePoster={handleSaveHomePoster}
             onNavigateToDashboard={() => setActiveTab('dashboard')}
+            onNavigateToMap={() => {
+              handleResetFilters();
+              try {
+                sessionStorage.setItem('hb_scroll_target', 'dashboard-area-map-section');
+              } catch {}
+              setActiveTab('dashboard', { skipScrollRestore: true });
+              window.dispatchEvent(new CustomEvent('hb_expand_dashboard_map'));
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('hb_expand_dashboard_map'));
+              }, 80);
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('hb_expand_dashboard_map'));
+              }, 250);
+            }}
+            onNavigateToAbout={() => setActiveTab('about')}
             onNavigateToAdmin={(subTab) => {
               if (subTab) {
                 try {
@@ -1107,6 +1165,23 @@ export default function App() {
             donationInfo={donationInfo}
             homePoster={homePoster}
             language={language}
+            setLanguage={setLanguage}
+            darkMode={darkMode}
+            setDarkMode={setDarkMode}
+            onOpenSettings={() => {
+              try {
+                sessionStorage.setItem('hb_settings_unlocked', 'true');
+                sessionStorage.setItem('hb_admin_feature', 'settings');
+                sessionStorage.setItem('hb_admin_main_tab', 'about');
+                sessionStorage.setItem('hb_admin_sub_tab', 'about_poster');
+                localStorage.setItem('hb_admin_main_tab', 'about');
+                localStorage.setItem('hb_admin_sub_tab', 'about_poster');
+              } catch {}
+              setActiveTab('admin');
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('hb_open_about_poster_settings'));
+              }, 50);
+            }}
           />
         )}
 
@@ -1197,7 +1272,7 @@ export default function App() {
             onClick={() => setIsAiOpen(false)}
           />
           <div
-            className={`fixed z-50 shadow-2xl rounded-none overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 animate-fade-in transition-all duration-300 ${
+            className={`fixed z-50 shadow-2xl rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 animate-fade-in transition-all duration-300 ${
               isAiExpanded
                 ? 'inset-3 sm:inset-8 max-w-5xl mx-auto my-auto h-[92vh] flex flex-col justify-between'
                 : 'bottom-4 right-4 w-[94vw] max-w-md sm:max-w-lg'
@@ -1302,12 +1377,21 @@ export default function App() {
       />
 
       {/* Footer */}
-      <footer className="bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 py-1.5 px-3 sm:px-6 text-[11px] text-slate-500 dark:text-slate-400 mt-auto transition-colors">
-        <div className="w-full flex items-center justify-center sm:justify-start font-medium leading-tight">
+      <footer className="bg-[#faf8f5] dark:bg-slate-950 py-3 px-3 sm:px-6 text-[11px] text-slate-500 dark:text-slate-400 mt-auto transition-colors">
+        <div className="w-full flex items-center justify-between font-medium leading-tight max-w-7xl mx-auto">
           <span className="inline-flex items-center gap-1.5 flex-wrap">
             <HbLogo logoUrl={homePoster?.logoUrl} className="h-3.5 w-auto text-[#ee1c25] shrink-0" />
-            <span>© 2026 Hope Bokeo Ministry • Bokeo Province, Lao PDR • Local Dev & Support</span>
+            <span>© 2026 Hope Bokeo Ministry • Bokeo Province, Lao PDR</span>
           </span>
+          <button
+            type="button"
+            onClick={() => setActiveTab('admin')}
+            className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition text-[11px] font-medium cursor-pointer"
+            title={language === 'lo' ? 'ລະບົບແອັດມິນ' : 'Admin Portal'}
+          >
+            <Lock className="w-3 h-3 text-slate-400" />
+            <span>{language === 'lo' ? 'ແອັດມິນ' : language === 'th' ? 'แอดมิน' : 'Admin'}</span>
+          </button>
         </div>
       </footer>
     </div>

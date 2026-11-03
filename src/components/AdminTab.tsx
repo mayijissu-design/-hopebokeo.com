@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, ShieldCheck, RotateCw, Plus, Edit2, Edit3, Trash2, KeyRound, Check, RefreshCw, Lock, Unlock, Sparkles, LayoutGrid, ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, Users, Building, Image as ImageIcon, Save, Loader2, Palette, Map, Eye, EyeOff, Search, ExternalLink, Upload, Settings, Move, Target, Crosshair, BookOpen, Maximize2, Church, Wallet, Coins, FileText, Sliders, Sun, Moon, Layers, Calendar } from 'lucide-react';
+import { Shield, ShieldCheck, RotateCw, RotateCcw, Plus, Edit2, Edit3, Trash2, KeyRound, Check, RefreshCw, Lock, Unlock, Sparkles, LayoutGrid, ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, Users, Building, Image as ImageIcon, Save, Loader2, Palette, Map, Eye, EyeOff, Search, ExternalLink, Upload, Settings, Move, Target, Crosshair, BookOpen, Maximize2, Church, Wallet, Coins, FileText, Sliders, Sun, Moon, Layers, Calendar } from 'lucide-react';
 import { Heart, CreditCard, QrCode, X } from 'lucide-react';
 import { Village, EventData, TeamMember, HomePoster, DonationInfo, Language, BankAccount, PosterImageCustomSetting, UpcomingScheduleItem, MinistryTimelineItem } from '../types';
 import { DEFAULT_BOKEO_TIMELINE } from '../data/timelineDefaults';
+import initialDefaultDonationBankAccounts from '../data/donationBankAccounts.json';
 import { UnifiedMediaUploader } from './UnifiedMediaUploader';
 import { MultiImageUploader } from './MultiImageUploader';
 import { QRCodeDisplay } from './QRCodeDisplay';
@@ -11,9 +12,13 @@ import { ChurchEditPortal } from './ChurchEditPortal';
 import { FinanceTab } from './FinanceTab';
 import { PosterSettingsSection } from './PosterSettingsSection';
 import { AboutPosterSettingsSection } from './AboutPosterSettingsSection';
+import { InsightsPosterSettingsSection } from './InsightsPosterSettingsSection';
+import { CommunitiesSettingsSection } from './CommunitiesSettingsSection';
+import { PrayerSettingsSection } from './PrayerSettingsSection';
 import { EventReportModal } from './EventReportModal';
 import { formatDateRange } from '../utils/dateFormatter';
 import { compressImageFile, shrinkBase64DataUrl, optimizePosterForFirestore } from '../utils/imageCompressor';
+import { uploadFileDirectly } from '../utils/fileUploader';
 import { getLocalizedRole } from '../utils/roleUtils';
 import {
   parseCoordinatesFromUrl,
@@ -71,7 +76,19 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   language,
   onBackToHome,
 }) => {
-  const [adminActiveFeature, setAdminActiveFeature] = useState<'hub' | 'settings' | 'church_update' | 'finance'>('hub');
+  const [adminActiveFeature, setAdminActiveFeature] = useState<'hub' | 'settings' | 'church_update' | 'finance'>(() => {
+    try {
+      const sub = sessionStorage.getItem('hb_admin_sub_tab');
+      if (sub === 'about_poster' || sub === 'poster' || sub === 'upcoming') return 'settings';
+      const feat = sessionStorage.getItem('hb_admin_feature');
+      if (feat && ['hub', 'settings', 'church_update', 'finance'].includes(feat)) return feat as any;
+      const hash = window.location.hash.replace(/^#/, '');
+      if (hash === 'settings') return 'settings';
+      if (hash === 'finance') return 'finance';
+      if (hash === 'church_update' || hash === 'church-update') return 'church_update';
+    } catch {}
+    return 'hub';
+  });
 
   // Auto-lock all rooms when leaving the Admin tab (unmount cleanup)
   useEffect(() => {
@@ -109,6 +126,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
   const [adminMainTab, setAdminMainTab] = useState<'home' | 'dashboard' | 'churches' | 'about'>(() => {
     try {
+      const sub = sessionStorage.getItem('hb_admin_sub_tab');
+      if (sub === 'about_poster' || sub === 'teams' || sub === 'donation') {
+        return 'about';
+      }
+      if (sub === 'insights_poster' || sub === 'pins') {
+        return 'dashboard';
+      }
       const sessionSaved = sessionStorage.getItem('hb_admin_main_tab');
       if (sessionSaved && ['home', 'dashboard', 'churches', 'about'].includes(sessionSaved)) {
         return sessionSaved as any;
@@ -120,19 +144,38 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     } catch {}
     return 'home';
   });
-  const [adminSubTab, setAdminSubTab] = useState<'poster' | 'upcoming' | 'events' | 'pins' | 'villages' | 'maps' | 'teams' | 'donation' | 'about_poster'>(() => {
+  const [adminSubTab, setAdminSubTab] = useState<'poster' | 'upcoming' | 'events' | 'communities' | 'prayer' | 'insights_poster' | 'pins' | 'villages' | 'maps' | 'teams' | 'donation' | 'about_poster'>(() => {
     try {
       const sessionSaved = sessionStorage.getItem('hb_admin_sub_tab');
-      if (sessionSaved && ['poster', 'upcoming', 'events', 'pins', 'villages', 'maps', 'teams', 'donation', 'about_poster'].includes(sessionSaved)) {
+      if (sessionSaved && ['poster', 'upcoming', 'events', 'communities', 'prayer', 'insights_poster', 'pins', 'villages', 'maps', 'teams', 'donation', 'about_poster'].includes(sessionSaved)) {
         return sessionSaved as any;
       }
       const saved = localStorage.getItem('hb_admin_sub_tab');
-      if (saved && ['poster', 'upcoming', 'events', 'pins', 'villages', 'maps', 'teams', 'donation', 'about_poster'].includes(saved)) {
+      if (saved && ['poster', 'upcoming', 'events', 'communities', 'prayer', 'insights_poster', 'pins', 'villages', 'maps', 'teams', 'donation', 'about_poster'].includes(saved)) {
         return saved as any;
       }
     } catch {}
     return 'poster';
   });
+
+  const [openMenuGroup, setOpenMenuGroup] = useState<string | null>(() => adminMainTab);
+  const [donationOpenSections, setDonationOpenSections] = useState<Record<string, boolean>>({});
+  const [mapsOpenSections, setMapsOpenSections] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setDonationOpenSections({});
+    setMapsOpenSections({});
+  }, [adminSubTab]);
+
+  const toggleDonationSection = (key: string) => {
+    setDonationOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+  const isDonationOpen = (key: string) => Boolean(donationOpenSections[key]);
+
+  const toggleMapsSection = (key: string) => {
+    setMapsOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+  const isMapsOpen = (key: string) => Boolean(mapsOpenSections[key]);
 
   useEffect(() => {
     try {
@@ -195,6 +238,30 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     window.addEventListener('hb_open_upcoming_event_settings', handleOpenUpcomingSettings);
     return () => window.removeEventListener('hb_open_upcoming_event_settings', handleOpenUpcomingSettings);
   }, []);
+
+  useEffect(() => {
+    const handleOpenAboutPosterSettings = () => {
+      setAdminActiveFeature('settings');
+      setAdminMainTab('about');
+      setAdminSubTab('about_poster');
+      try {
+        sessionStorage.setItem('hb_settings_unlocked', 'true');
+        sessionStorage.setItem('hb_admin_feature', 'settings');
+        sessionStorage.setItem('hb_admin_main_tab', 'about');
+        sessionStorage.setItem('hb_admin_sub_tab', 'about_poster');
+        localStorage.setItem('hb_admin_main_tab', 'about');
+        localStorage.setItem('hb_admin_sub_tab', 'about_poster');
+      } catch {}
+      setTimeout(() => {
+        const el = document.getElementById('about-poster-settings');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 350);
+    };
+    window.addEventListener('hb_open_about_poster_settings', handleOpenAboutPosterSettings);
+    return () => window.removeEventListener('hb_open_about_poster_settings', handleOpenAboutPosterSettings);
+  }, []);
   const [editingPinRowId, setEditingPinRowId] = useState<number | null>(null);
   const [tempPin, setTempPin] = useState<string>('');
   const [pinSavedToast, setPinSavedToast] = useState<string>('');
@@ -205,77 +272,92 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   const [donationAccountName, setDonationAccountName] = useState<string>(donationInfo?.accountName || 'HOPE BOKEO MINISTRY PROJECT');
   const [donationAccountNumber, setDonationAccountNumber] = useState<string>(donationInfo?.accountNumber || '010-12-00-012345678-001');
   const [donationSwiftCode, setDonationSwiftCode] = useState<string>(donationInfo?.swiftCode || 'BCELLA2X');
-  const [donationQrImageUrl, setDonationQrImageUrl] = useState<string>(donationInfo?.qrImageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600');
-  const [donationBankAccounts, setDonationBankAccounts] = useState<BankAccount[]>(
-    donationInfo?.bankAccounts && donationInfo.bankAccounts.length > 0
-      ? donationInfo.bankAccounts
-      : [
-          {
-            id: '1',
-            bankName: donationInfo?.bankName || 'ທະນາຄານ ການຄ້າຕ່າງປະເທດລາວ ມະຫາຊົນ (BCEL)',
-            bankNameEn: donationInfo?.bankNameEn || 'Banque Pour Le Commerce Exterieur Lao Public (BCEL)',
-            accountName: donationInfo?.accountName || 'HOPE BOKEO MINISTRY PROJECT',
-            accountNumber: donationInfo?.accountNumber || '010-12-00-012345678-001',
-            swiftCode: donationInfo?.swiftCode || 'BCELLA2X',
-            qrImageUrl: donationInfo?.qrImageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600',
-          },
-          {
-            id: '2',
-            bankName: 'ທະນາຄານ ພັດທະນາລາວ (LDB)',
-            bankNameEn: 'Lao Development Bank (LDB)',
-            accountName: 'HOPE BOKEO MINISTRY PROJECT',
-            accountNumber: '160-11-00-098765432-002',
-            swiftCode: 'LDBLA2X',
-            qrImageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600',
-          },
-          {
-            id: '3',
-            bankName: 'ທະນາຄານ ຮ່ວມພັດທະນາ (JDB)',
-            bankNameEn: 'Joint Development Bank (JDB)',
-            accountName: 'HOPE BOKEO MINISTRY PROJECT',
-            accountNumber: '020-15-00-055443322-003',
-            swiftCode: 'JDBLA2X',
-            qrImageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600',
-          },
-        ]
+  const [donationQrImageUrl, setDonationQrImageUrl] = useState<string>(() => {
+    if (donationInfo?.qrImageUrl && donationInfo.qrImageUrl.startsWith('data:image')) {
+      return donationInfo.qrImageUrl;
+    }
+    const defQr = (initialDefaultDonationBankAccounts as any[])?.[0]?.qrImageUrl;
+    return defQr || donationInfo?.qrImageUrl || '';
+  });
+  const [donationBankAccounts, setDonationBankAccounts] = useState<BankAccount[]>(() => {
+    const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
+    if (donationInfo?.bankAccounts && donationInfo.bankAccounts.length > 0) {
+      return donationInfo.bankAccounts.map((acc, idx) => {
+        const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+        const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+        return {
+          ...acc,
+          qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+        };
+      });
+    }
+    return defaults;
+  });
+  const [donationPhone, setDonationPhone] = useState<string>(
+    donationInfo?.prayerContactPhone && donationInfo.prayerContactPhone !== '+856 20 55512345'
+      ? donationInfo.prayerContactPhone
+      : (donationInfo?.prayerContactWhatsapp || '+856 20 76838584')
   );
-  const [donationPhone, setDonationPhone] = useState<string>(donationInfo?.prayerContactPhone || '+856 20 55512345');
   const [donationWhatsapp, setDonationWhatsapp] = useState<string>(donationInfo?.prayerContactWhatsapp || '+856 20 76838584');
   const [donationEmail, setDonationEmail] = useState<string>(donationInfo?.prayerContactEmail || 'info@hopebokeo.org');
   const [donationSupportNote, setDonationSupportNote] = useState<string>(donationInfo?.supportNote || 'ທຸກໆການຮ່ວມບໍລິຈາກ ແລະ ຄຳອະທິຖານຂອງທ່ານ ແມ່ນມີຄຸນຄ່າຢ່າງຍິ່ງ ເພື່ອຂະຫຍາຍແຜ່ນດິນຂອງພຣະເຈົ້າ ແລະ ຊ່ວຍເຫຼືອຊຸມຊົນໃນແຂວງບໍ່ແກ້ວ.');
   const [donationSupportNoteEn, setDonationSupportNoteEn] = useState<string>(donationInfo?.supportNoteEn || 'Your donations and faithful prayers are deeply appreciated to help expand God’s Kingdom and empower local communities across Bokeo Province.');
   const [donationSupportNoteTh, setDonationSupportNoteTh] = useState<string>(donationInfo?.supportNoteTh || 'ทุกๆ การร่วมบริจาคและคำอธิษฐานของคุณมีคุณค่าอย่างยิ่ง เพื่อขยายแผ่นดินของพระเจ้าและช่วยเหลือชุมชนในแขวงบ่อแก้ว');
 
-  const [donationVision, setDonationVision] = useState<string>(donationInfo?.vision || 'ສ້າງສາວົກ ແລະ ຂະຫຍາຍແຜ່ນດິນຂອງພຣະເຈົ້າໃຫ້ຄວບຄຸມທຸກພື້ນທີ່ໃນແຂວງບໍ່ແກ້ວ.\n\nພວກເຮົາປາຖະໜາທີ່ຈະເຫັນທຸກໝູ່ບ້ານໄດ້ຍິນຂ່າວປະເສີດ ແລະ ມີຄິດສະຈັກທີ່ເຂັ້ມແຂງຕັ້ງຢູ່ ເພື່ອເປັນຄວາມສະຫວ່າງໃຫ້ແກ່ຊຸມຊົນ.');
-  const [donationVisionEn, setDonationVisionEn] = useState<string>(donationInfo?.visionEn || 'Disciple nations and expand the Kingdom of God across every district in Bokeo Province.\n\nWe desire to see every village hear the Gospel and establish vibrant local fellowships that serve as light to their communities.');
-  const [donationVisionTh, setDonationVisionTh] = useState<string>(donationInfo?.visionTh || 'สร้างสาวกและขยายแผ่นดินของพระเจ้าให้ครอบคลุมทุกพื้นที่ในแขวงบ่อแก้ว\n\nเราปรารถนาที่จะเห็นทุกหมู่บ้านได้ยินข่าวประเสริฐ และมีคริสตจักรที่เข้มแข็งตั้งอยู่เพื่อเป็นความสว่างแก่ชุมชน');
+  const [donationVision, setDonationVision] = useState<string>(
+    homePoster?.vision || donationInfo?.vision || 'ສ້າງສາວົກ ແລະ ຂະຫຍາຍແຜ່ນດິນຂອງພຣະເຈົ້າໃຫ້ຄວບຄຸມທຸກພື້ນທີ່ໃນແຂວງບໍ່ແກ້ວ.\n\nພວກເຮົາປາຖະໜາທີ່ຈະເຫັນທຸກໝູ່ບ້ານໄດ້ຍິນຂ່າວປະເສີດ ແລະ ມີຄິດສະຈັກທີ່ເຂັ້ມແຂງຕັ້ງຢູ່ ເພື່ອເປັນຄວາມສະຫວ່າງໃຫ້ແກ່ຊຸມຊົນ.'
+  );
+  const [donationVisionEn, setDonationVisionEn] = useState<string>(
+    homePoster?.visionEn || donationInfo?.visionEn || 'Disciple nations and expand the Kingdom of God across every district in Bokeo Province.\n\nWe desire to see every village hear the Gospel and establish vibrant local fellowships that serve as light to their communities.'
+  );
+  const [donationVisionTh, setDonationVisionTh] = useState<string>(
+    homePoster?.visionTh || donationInfo?.visionTh || 'สร้างสาวกและขยายแผ่นดินของพระเจ้าให้ครอบคลุมทุกพื้นที่ในแขวงบ่อแก้ว\n\nเราปรารถนาที่จะเห็นทุกหมู่บ้านได้ยินข่าวประเสริฐ และมีคริสตจักรที่เข้มแข็งตั้งอยู่เพื่อเป็นความสว่างแก่ชุมชน'
+  );
 
-  const [donationMission, setDonationMission] = useState<string>(donationInfo?.mission || 'ປະກາດຂ່າວປະເສີດຢ່າງກ້າຫານໃນທຸກໆບ້ານ.\nຝຶກອົບຮົມ ແລະ ສ້າງຜູ້ນຳທ້ອງຖິ່ນໃຫ້ເຂັ້ມແຂງ.\nຊ່ວຍເຫຼືອສັງຄົມ ແລະ ຜູ້ທີ່ຖືກຂົ່ມເຫັງທຸກຢາກ.\nອະທິຖານວິງວອນ ແລະ ຕິດຕາມຜົນຢ່າງໃກ້ຊິດ.');
-  const [donationMissionEn, setDonationMissionEn] = useState<string>(donationInfo?.missionEn || 'Proclaim the Gospel boldly in every village.\nTrain and equip local spiritual leaders.\nProvide humanitarian care and relief to the needy.\nIntercede continuously and faithfully track ministry fruit.');
-  const [donationMissionTh, setDonationMissionTh] = useState<string>(donationInfo?.missionTh || 'ประกาศข่าวประเสริฐอย่างกล้าหาญในทุกๆ หมู่บ้าน\nฝึกอบรมและสร้างผู้นำท้องถิ่นให้เข้มแข็ง\nช่วยเหลือสังคมและผู้ที่ถูกข่มเหงยากลำบาก\nอธิษฐานวิงวອນและติดตามผลอย่างใกล้ชิด');
+  const [donationMission, setDonationMission] = useState<string>(
+    homePoster?.mission || donationInfo?.mission || 'ປະກາດຂ່າວປະເສີດຢ່າງກ້າຫານໃນທຸກໆບ້ານ.\nຝຶກອົບຮົມ ແລະ ສ້າງຜູ້ນຳທ້ອງຖິ່ນໃຫ້ເຂັ້ມແຂງ.\nຊ່ວຍເຫຼືອສັງຄົມ ແລະ ຜູ້ທີ່ຖືກຂົ່ມເຫັງທຸກຢາກ.\nອະທິຖານວິງວອນ ແລະ ຕິດຕາມຜົນຢ່າງໃກ້ຊິດ.'
+  );
+  const [donationMissionEn, setDonationMissionEn] = useState<string>(
+    homePoster?.missionEn || donationInfo?.missionEn || 'Proclaim the Gospel boldly in every village.\nTrain and equip local spiritual leaders.\nProvide humanitarian care and relief to the needy.\nIntercede continuously and faithfully track ministry fruit.'
+  );
+  const [donationMissionTh, setDonationMissionTh] = useState<string>(
+    homePoster?.missionTh || donationInfo?.missionTh || 'ประกาศข่าวประเสริฐอย่างกล้าหาญในทุกๆ หมู่บ้าน\nฝึกอบรมและสร้างผู้นำท้องถิ่นให้เข้มแข็ง\nช่วยเหลือสังคมและผู้ที่ถูกข่มเหงยากลำบาก\nอธิษฐานวิงวอนและติดตามผลอย่างใกล้ชิด'
+  );
 
   const [donationPurposeDesc, setDonationPurposeDesc] = useState<string>(donationInfo?.purposeDesc || 'ເງິນບໍລິຈາກທັງໝົດຈະຖືກນຳໃຊ້ເຂົ້າໃນການສະໜັບສະໜູນພັນທະກິດພາກສະໜາມ, ການສ້າງຄຣິດຕະຈັກ, ການຊ່ວຍເຫຼືອຊຸມຊົນ, ການຝຶກອົບຮົມຜູ້ນຳ, ແລະ ການບັນເທົາທຸກໃນ 5 ເມືອງຂອງແຂວງບໍ່ແກ້ວ.');
   const [donationPurposeDescEn, setDonationPurposeDescEn] = useState<string>(donationInfo?.purposeDescEn || 'All donations directly fund field ministry operations, church planting, leadership training, youth activities, and community relief across all 5 districts of Bokeo Province.');
   const [donationPurposeDescTh, setDonationPurposeDescTh] = useState<string>(donationInfo?.purposeDescTh || 'เงินบริจาคทั้งหมดจะถูกนำไปใช้ในการสนับสนุนพันธกิจภาคสนาม การสร้างคริสตจักร การช่วยเหลือชุมชน การฝึกอบรมผู้นำ และการบรรเทาทุกข์ใน 5 เมืองของแขวงบ่อแก้ว');
 
   const [isSavingDonation, setIsSavingDonation] = useState<boolean>(false);
-  const [isEditingDonation, setIsEditingDonation] = useState<boolean>(false);
+  const [isEditingDonation, setIsEditingDonation] = useState<boolean>(true);
   const [donationVisionLang, setDonationVisionLang] = useState<'la' | 'tha' | 'en'>('la');
   const [donationMissionLang, setDonationMissionLang] = useState<'la' | 'tha' | 'en'>('la');
   const [donationPurposeLang, setDonationPurposeLang] = useState<'la' | 'tha' | 'en'>('la');
   const [donationSupportNoteLang, setDonationSupportNoteLang] = useState<'la' | 'tha' | 'en'>('la');
 
   const [hideDonationSectionState, setHideDonationSectionState] = useState<boolean>(donationInfo?.hideDonationSection || donationInfo?.hidden || false);
-  const [hideVisionMissionState, setHideVisionMissionState] = useState<boolean>(donationInfo?.hideVisionMission || false);
+  const [hideVisionMissionState, setHideVisionMissionState] = useState<boolean>(
+    homePoster?.hideVisionMission !== undefined ? homePoster.hideVisionMission : (donationInfo?.hideVisionMission || false)
+  );
+  const [hidePrayerLineState, setHidePrayerLineState] = useState<boolean>(donationInfo?.hidePrayerLine || false);
 
   const handleCancelEditDonation = () => {
+    const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
     if (donationInfo) {
       if (donationInfo.bankName) setDonationBankName(donationInfo.bankName);
       if (donationInfo.accountName) setDonationAccountName(donationInfo.accountName);
       if (donationInfo.accountNumber) setDonationAccountNumber(donationInfo.accountNumber);
       if (donationInfo.swiftCode !== undefined) setDonationSwiftCode(donationInfo.swiftCode);
-      if (donationInfo.qrImageUrl) setDonationQrImageUrl(donationInfo.qrImageUrl);
-      if (donationInfo.prayerContactPhone) setDonationPhone(donationInfo.prayerContactPhone);
+      if (donationInfo.qrImageUrl && donationInfo.qrImageUrl.startsWith('data:image')) {
+        setDonationQrImageUrl(donationInfo.qrImageUrl);
+      } else {
+        setDonationQrImageUrl((defaults[0] as any)?.qrImageUrl || '');
+      }
+      if (donationInfo.prayerContactPhone && donationInfo.prayerContactPhone !== '+856 20 55512345') {
+        setDonationPhone(donationInfo.prayerContactPhone);
+      } else if (donationInfo.prayerContactWhatsapp) {
+        setDonationPhone(donationInfo.prayerContactWhatsapp);
+      }
       if (donationInfo.prayerContactWhatsapp) setDonationWhatsapp(donationInfo.prayerContactWhatsapp);
       if (donationInfo.prayerContactEmail) setDonationEmail(donationInfo.prayerContactEmail);
       if (donationInfo.supportNote) setDonationSupportNote(donationInfo.supportNote);
@@ -291,23 +373,47 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (donationInfo.missionEn) setDonationMissionEn(donationInfo.missionEn);
       if (donationInfo.missionTh) setDonationMissionTh(donationInfo.missionTh);
       if (donationInfo.bankAccounts && donationInfo.bankAccounts.length > 0) {
-        setDonationBankAccounts(donationInfo.bankAccounts);
+        const merged = donationInfo.bankAccounts.map((acc, idx) => {
+          const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+          const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+          return {
+            ...acc,
+            qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+          };
+        });
+        setDonationBankAccounts(merged);
+      } else {
+        setDonationBankAccounts(defaults);
       }
       if (donationInfo.hideDonationSection !== undefined) setHideDonationSectionState(donationInfo.hideDonationSection);
       else if (donationInfo.hidden !== undefined) setHideDonationSectionState(donationInfo.hidden);
       if (donationInfo.hideVisionMission !== undefined) setHideVisionMissionState(donationInfo.hideVisionMission);
+      if (donationInfo.hidePrayerLine !== undefined) setHidePrayerLineState(donationInfo.hidePrayerLine);
+    } else {
+      setDonationBankAccounts(defaults);
     }
-    setIsEditingDonation(false);
+    setIsEditingDonation(true);
   };
 
   useEffect(() => {
     if (donationInfo) {
+      const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
       if (donationInfo.bankName) setDonationBankName(donationInfo.bankName);
       if (donationInfo.accountName) setDonationAccountName(donationInfo.accountName);
       if (donationInfo.accountNumber) setDonationAccountNumber(donationInfo.accountNumber);
       if (donationInfo.swiftCode !== undefined) setDonationSwiftCode(donationInfo.swiftCode);
-      if (donationInfo.qrImageUrl) setDonationQrImageUrl(donationInfo.qrImageUrl);
-      if (donationInfo.prayerContactPhone) setDonationPhone(donationInfo.prayerContactPhone);
+      if (donationInfo.qrImageUrl) {
+        if (donationInfo.qrImageUrl.startsWith('data:image')) {
+          setDonationQrImageUrl(donationInfo.qrImageUrl);
+        } else if ((defaults[0] as any)?.qrImageUrl) {
+          setDonationQrImageUrl((defaults[0] as any).qrImageUrl);
+        }
+      }
+      if (donationInfo.prayerContactPhone && donationInfo.prayerContactPhone !== '+856 20 55512345') {
+        setDonationPhone(donationInfo.prayerContactPhone);
+      } else if (donationInfo.prayerContactWhatsapp) {
+        setDonationPhone(donationInfo.prayerContactWhatsapp);
+      }
       if (donationInfo.prayerContactWhatsapp) setDonationWhatsapp(donationInfo.prayerContactWhatsapp);
       if (donationInfo.prayerContactEmail) setDonationEmail(donationInfo.prayerContactEmail);
       if (donationInfo.supportNote) setDonationSupportNote(donationInfo.supportNote);
@@ -323,11 +429,20 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (donationInfo.missionEn) setDonationMissionEn(donationInfo.missionEn);
       if (donationInfo.missionTh) setDonationMissionTh(donationInfo.missionTh);
       if (donationInfo.bankAccounts && donationInfo.bankAccounts.length > 0) {
-        setDonationBankAccounts(donationInfo.bankAccounts);
+        const merged = donationInfo.bankAccounts.map((acc, idx) => {
+          const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+          const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+          return {
+            ...acc,
+            qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+          };
+        });
+        setDonationBankAccounts(merged);
       }
       if (donationInfo.hideDonationSection !== undefined) setHideDonationSectionState(donationInfo.hideDonationSection);
       else if (donationInfo.hidden !== undefined) setHideDonationSectionState(donationInfo.hidden);
       if (donationInfo.hideVisionMission !== undefined) setHideVisionMissionState(donationInfo.hideVisionMission);
+      if (donationInfo.hidePrayerLine !== undefined) setHidePrayerLineState(donationInfo.hidePrayerLine);
     }
   }, [donationInfo]);
 
@@ -374,12 +489,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
         hidden: Boolean(hideDonationSectionState),
         hideDonationSection: Boolean(hideDonationSectionState),
         hideVisionMission: Boolean(hideVisionMissionState),
+        hidePrayerLine: Boolean(hidePrayerLineState),
       };
 
       if (onSaveDonationInfo) {
         await onSaveDonationInfo(updated);
       }
-      setIsEditingDonation(false);
+      setIsEditingDonation(true);
       setPinSavedToast(
         language === 'lo'
           ? 'ອັບເດດຂໍ້ມູນການບໍລິຈາກ ແລະ ຊ່ອງທາງອະທິຖານ ສຳເລັດແລ້ວ!'
@@ -399,9 +515,21 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   const [selectedMapVillageRowId, setSelectedMapVillageRowId] = useState<number | null>(null);
 
   // Home Poster Edit Local State
-  const [posterTitle, setPosterTitle] = useState<string>(homePoster?.title || 'ປະກາດຂ່າວປະເສີດ ແລະ ສ້າງສາວົກ');
-  const [posterTitleEn, setPosterTitleEn] = useState<string>(homePoster?.titleEn || 'Proclaim Gospel & Disciple Nations');
-  const [posterTitleTh, setPosterTitleTh] = useState<string>(homePoster?.titleTh || 'ประกาศข่าวประเสริฐ และสร้างสาวก');
+  const [posterTitle, setPosterTitle] = useState<string>(
+    homePoster?.title && homePoster.title !== 'ປະກາດຂ່າວປະເສີດ ແລະ ສ້າງສາວົກ'
+      ? homePoster.title
+      : 'Hope is growing in Bokeo.'
+  );
+  const [posterTitleEn, setPosterTitleEn] = useState<string>(
+    homePoster?.titleEn && homePoster.titleEn !== 'Proclaim Gospel & Disciple Nations'
+      ? homePoster.titleEn
+      : 'Hope is growing in Bokeo.'
+  );
+  const [posterTitleTh, setPosterTitleTh] = useState<string>(
+    homePoster?.titleTh && homePoster.titleTh !== 'ประกาศข่าวประเสริฐ และสร้างสาวก'
+      ? homePoster.titleTh
+      : 'Hope is growing in Bokeo.'
+  );
   const [posterSubtitle, setPosterSubtitle] = useState<string>(homePoster?.subtitle || 'ແຂວງບໍ່ແກ້ວ (Bokeo Province)');
   const [posterSubtitleEn, setPosterSubtitleEn] = useState<string>(homePoster?.subtitleEn || 'Bokeo Province (Lao PDR)');
   const [posterSubtitleTh, setPosterSubtitleTh] = useState<string>(homePoster?.subtitleTh || 'แขวงบ่อแก้ว (Bokeo Province)');
@@ -478,7 +606,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     typeof homePoster?.posterEdgeFade === 'number' ? homePoster.posterEdgeFade : 0
   );
   const [bokeoPosterHeight, setBokeoPosterHeight] = useState<number>(
-    typeof homePoster?.bokeoPosterHeight === 'number' ? homePoster.bokeoPosterHeight : 380
+    typeof homePoster?.bokeoPosterHeight === 'number'
+      ? (homePoster.bokeoPosterHeight > 100
+          ? Math.round(Math.min(Math.max(((homePoster.bokeoPosterHeight - 180) / 380) * 100, 0), 100))
+          : homePoster.bokeoPosterHeight)
+      : 50
   );
   const [bokeoPosterOverlayOpacity, setBokeoPosterOverlayOpacity] = useState<number>(
     typeof homePoster?.bokeoPosterOverlayOpacity === 'number' ? homePoster.bokeoPosterOverlayOpacity : 70
@@ -493,6 +625,24 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   const [posterBtnText, setPosterBtnText] = useState<string>(homePoster?.buttonText || 'ເບິ່ງດາສບອດຂໍ້ມູນ');
   const [posterBtnTextEn, setPosterBtnTextEn] = useState<string>(homePoster?.buttonTextEn || 'View Dashboard');
   const [posterBtnTextTh, setPosterBtnTextTh] = useState<string>(homePoster?.buttonTextTh || 'ดูแดชบอร์ดข้อมูล');
+
+  const [posterLocationTag, setPosterLocationTag] = useState<string>(homePoster?.posterLocationTag || 'BOKEO PROVINCE · LAO PDR');
+  const [posterLocationTagEn, setPosterLocationTagEn] = useState<string>(homePoster?.posterLocationTagEn || 'BOKEO PROVINCE · LAO PDR');
+  const [posterLocationTagTh, setPosterLocationTagTh] = useState<string>(homePoster?.posterLocationTagTh || 'BOKEO PROVINCE · LAO PDR');
+
+  const [posterVideoBtnText, setPosterVideoBtnText] = useState<string>(homePoster?.videoBtnText || 'ຮັບຊົມເລື່ອງລາວຂອງພວກເຮົາ');
+  const [posterVideoBtnTextEn, setPosterVideoBtnTextEn] = useState<string>(homePoster?.videoBtnTextEn || 'Watch Our Story');
+  const [posterVideoBtnTextTh, setPosterVideoBtnTextTh] = useState<string>(homePoster?.videoBtnTextTh || 'รับชมเรื่องราวของเรา');
+
+  const [posterBadgeTopText, setPosterBadgeTopText] = useState<string>(homePoster?.badgeTopText || 'Real People.');
+  const [posterBadgeTopTextEn, setPosterBadgeTopTextEn] = useState<string>(homePoster?.badgeTopTextEn || 'Real People.');
+  const [posterBadgeTopTextTh, setPosterBadgeTopTextTh] = useState<string>(homePoster?.badgeTopTextTh || 'Real People.');
+
+  const [posterBadgeBottomText, setPosterBadgeBottomText] = useState<string>(homePoster?.badgeBottomText || 'Real Hope.');
+  const [posterBadgeBottomTextEn, setPosterBadgeBottomTextEn] = useState<string>(homePoster?.badgeBottomTextEn || 'Real Hope.');
+  const [posterBadgeBottomTextTh, setPosterBadgeBottomTextTh] = useState<string>(homePoster?.badgeBottomTextTh || 'Real Hope.');
+
+  const [hideRightBadge, setHideRightBadge] = useState<boolean>(homePoster?.hideRightBadge || false);
 
   // Upcoming Event / Announcement (ງານທີ່ຈະມາເຖິງ / ແຈ້ງການ & ປະກາດ)
   const [upcomingEventTitle, setUpcomingEventTitle] = useState<string>(homePoster?.upcomingEventTitle || '');
@@ -659,13 +809,29 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (homePoster.posterBlur !== undefined) setPosterBlur(typeof homePoster.posterBlur === 'number' ? homePoster.posterBlur : 0);
       if (homePoster.posterOverlayOpacity !== undefined) setPosterOverlayOpacity(typeof homePoster.posterOverlayOpacity === 'number' ? homePoster.posterOverlayOpacity : 85);
       if (homePoster.posterEdgeFade !== undefined) setPosterEdgeFade(typeof homePoster.posterEdgeFade === 'number' ? homePoster.posterEdgeFade : 0);
-      if (homePoster.bokeoPosterHeight !== undefined) setBokeoPosterHeight(typeof homePoster.bokeoPosterHeight === 'number' ? homePoster.bokeoPosterHeight : 380);
+      if (homePoster.bokeoPosterHeight !== undefined) {
+        const val = typeof homePoster.bokeoPosterHeight === 'number' ? homePoster.bokeoPosterHeight : 50;
+        setBokeoPosterHeight(val > 100 ? Math.round(Math.min(Math.max(((val - 180) / 380) * 100, 0), 100)) : val);
+      }
       if (homePoster.bokeoPosterOverlayOpacity !== undefined) setBokeoPosterOverlayOpacity(typeof homePoster.bokeoPosterOverlayOpacity === 'number' ? homePoster.bokeoPosterOverlayOpacity : 70);
       if (homePoster.bokeoPosterEdgeFade !== undefined) setBokeoPosterEdgeFade(typeof homePoster.bokeoPosterEdgeFade === 'number' ? homePoster.bokeoPosterEdgeFade : 0);
       if (homePoster.bokeoPosterDim !== undefined) setBokeoPosterDim(typeof homePoster.bokeoPosterDim === 'number' ? homePoster.bokeoPosterDim : 40);
       if (homePoster.buttonText) setPosterBtnText(homePoster.buttonText);
       if (homePoster.buttonTextEn) setPosterBtnTextEn(homePoster.buttonTextEn);
       if (homePoster.buttonTextTh) setPosterBtnTextTh(homePoster.buttonTextTh);
+      if (homePoster.posterLocationTag !== undefined) setPosterLocationTag(homePoster.posterLocationTag);
+      if (homePoster.posterLocationTagEn !== undefined) setPosterLocationTagEn(homePoster.posterLocationTagEn);
+      if (homePoster.posterLocationTagTh !== undefined) setPosterLocationTagTh(homePoster.posterLocationTagTh);
+      if (homePoster.videoBtnText !== undefined) setPosterVideoBtnText(homePoster.videoBtnText);
+      if (homePoster.videoBtnTextEn !== undefined) setPosterVideoBtnTextEn(homePoster.videoBtnTextEn);
+      if (homePoster.videoBtnTextTh !== undefined) setPosterVideoBtnTextTh(homePoster.videoBtnTextTh);
+      if (homePoster.badgeTopText !== undefined) setPosterBadgeTopText(homePoster.badgeTopText);
+      if (homePoster.badgeTopTextEn !== undefined) setPosterBadgeTopTextEn(homePoster.badgeTopTextEn);
+      if (homePoster.badgeTopTextTh !== undefined) setPosterBadgeTopTextTh(homePoster.badgeTopTextTh);
+      if (homePoster.badgeBottomText !== undefined) setPosterBadgeBottomText(homePoster.badgeBottomText);
+      if (homePoster.badgeBottomTextEn !== undefined) setPosterBadgeBottomTextEn(homePoster.badgeBottomTextEn);
+      if (homePoster.badgeBottomTextTh !== undefined) setPosterBadgeBottomTextTh(homePoster.badgeBottomTextTh);
+      if (homePoster.hideRightBadge !== undefined) setHideRightBadge(homePoster.hideRightBadge);
       if (homePoster.videoUrl !== undefined) setPosterVideoUrl(homePoster.videoUrl);
       if (homePoster.bgColor !== undefined) setAppBgColor(homePoster.bgColor);
       if (homePoster.bgImageUrl !== undefined) setAppBgImageUrl(homePoster.bgImageUrl);
@@ -706,6 +872,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       }
       if (homePoster.bokeoTimelineTitleTh !== undefined) setBokeoTimelineTitleTh(homePoster.bokeoTimelineTitleTh);
       if (homePoster.hideBokeoTimeline !== undefined) setHideBokeoTimeline(homePoster.hideBokeoTimeline);
+      if (homePoster.vision !== undefined) setDonationVision(homePoster.vision);
+      if (homePoster.visionEn !== undefined) setDonationVisionEn(homePoster.visionEn);
+      if (homePoster.visionTh !== undefined) setDonationVisionTh(homePoster.visionTh);
+      if (homePoster.mission !== undefined) setDonationMission(homePoster.mission);
+      if (homePoster.missionEn !== undefined) setDonationMissionEn(homePoster.missionEn);
+      if (homePoster.missionTh !== undefined) setDonationMissionTh(homePoster.missionTh);
+      if (homePoster.hideVisionMission !== undefined) setHideVisionMissionState(homePoster.hideVisionMission);
     }
   };
 
@@ -836,9 +1009,15 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
   useEffect(() => {
     if (homePoster) {
-      if (homePoster.title) setPosterTitle(homePoster.title);
-      if (homePoster.titleEn) setPosterTitleEn(homePoster.titleEn);
-      if (homePoster.titleTh) setPosterTitleTh(homePoster.titleTh);
+      if (homePoster.title) {
+        setPosterTitle(homePoster.title === 'ປະກາດຂ່າວປະເສີດ ແລະ ສ້າງສາວົກ' ? 'Hope is growing in Bokeo.' : homePoster.title);
+      }
+      if (homePoster.titleEn) {
+        setPosterTitleEn(homePoster.titleEn === 'Proclaim Gospel & Disciple Nations' ? 'Hope is growing in Bokeo.' : homePoster.titleEn);
+      }
+      if (homePoster.titleTh) {
+        setPosterTitleTh(homePoster.titleTh === 'ประกาศข่าวประเสริฐ และสร้างสาวก' ? 'Hope is growing in Bokeo.' : homePoster.titleTh);
+      }
       if (homePoster.subtitle) setPosterSubtitle(homePoster.subtitle);
       if (homePoster.subtitleEn) setPosterSubtitleEn(homePoster.subtitleEn);
       if (homePoster.subtitleTh) setPosterSubtitleTh(homePoster.subtitleTh);
@@ -877,13 +1056,29 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (homePoster.posterBlur !== undefined) setPosterBlur(typeof homePoster.posterBlur === 'number' ? homePoster.posterBlur : 0);
       if (homePoster.posterOverlayOpacity !== undefined) setPosterOverlayOpacity(typeof homePoster.posterOverlayOpacity === 'number' ? homePoster.posterOverlayOpacity : 85);
       if (homePoster.posterEdgeFade !== undefined) setPosterEdgeFade(typeof homePoster.posterEdgeFade === 'number' ? homePoster.posterEdgeFade : 0);
-      if (homePoster.bokeoPosterHeight !== undefined) setBokeoPosterHeight(typeof homePoster.bokeoPosterHeight === 'number' ? homePoster.bokeoPosterHeight : 380);
+      if (homePoster.bokeoPosterHeight !== undefined) {
+        const val = typeof homePoster.bokeoPosterHeight === 'number' ? homePoster.bokeoPosterHeight : 50;
+        setBokeoPosterHeight(val > 100 ? Math.round(Math.min(Math.max(((val - 180) / 380) * 100, 0), 100)) : val);
+      }
       if (homePoster.bokeoPosterOverlayOpacity !== undefined) setBokeoPosterOverlayOpacity(typeof homePoster.bokeoPosterOverlayOpacity === 'number' ? homePoster.bokeoPosterOverlayOpacity : 70);
       if (homePoster.bokeoPosterEdgeFade !== undefined) setBokeoPosterEdgeFade(typeof homePoster.bokeoPosterEdgeFade === 'number' ? homePoster.bokeoPosterEdgeFade : 0);
       if (homePoster.bokeoPosterDim !== undefined) setBokeoPosterDim(typeof homePoster.bokeoPosterDim === 'number' ? homePoster.bokeoPosterDim : 40);
       if (homePoster.buttonText) setPosterBtnText(homePoster.buttonText);
       if (homePoster.buttonTextEn) setPosterBtnTextEn(homePoster.buttonTextEn);
       if (homePoster.buttonTextTh) setPosterBtnTextTh(homePoster.buttonTextTh);
+      if (homePoster.posterLocationTag !== undefined) setPosterLocationTag(homePoster.posterLocationTag);
+      if (homePoster.posterLocationTagEn !== undefined) setPosterLocationTagEn(homePoster.posterLocationTagEn);
+      if (homePoster.posterLocationTagTh !== undefined) setPosterLocationTagTh(homePoster.posterLocationTagTh);
+      if (homePoster.videoBtnText !== undefined) setPosterVideoBtnText(homePoster.videoBtnText);
+      if (homePoster.videoBtnTextEn !== undefined) setPosterVideoBtnTextEn(homePoster.videoBtnTextEn);
+      if (homePoster.videoBtnTextTh !== undefined) setPosterVideoBtnTextTh(homePoster.videoBtnTextTh);
+      if (homePoster.badgeTopText !== undefined) setPosterBadgeTopText(homePoster.badgeTopText);
+      if (homePoster.badgeTopTextEn !== undefined) setPosterBadgeTopTextEn(homePoster.badgeTopTextEn);
+      if (homePoster.badgeTopTextTh !== undefined) setPosterBadgeTopTextTh(homePoster.badgeTopTextTh);
+      if (homePoster.badgeBottomText !== undefined) setPosterBadgeBottomText(homePoster.badgeBottomText);
+      if (homePoster.badgeBottomTextEn !== undefined) setPosterBadgeBottomTextEn(homePoster.badgeBottomTextEn);
+      if (homePoster.badgeBottomTextTh !== undefined) setPosterBadgeBottomTextTh(homePoster.badgeBottomTextTh);
+      if (homePoster.hideRightBadge !== undefined) setHideRightBadge(homePoster.hideRightBadge);
       if (homePoster.videoUrl !== undefined) setPosterVideoUrl(homePoster.videoUrl);
       if (homePoster.bgColor !== undefined) setAppBgColor(homePoster.bgColor);
       if (homePoster.bgImageUrl !== undefined) setAppBgImageUrl(homePoster.bgImageUrl);
@@ -954,8 +1149,101 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       }
       if (homePoster.bokeoTimelineTitleTh !== undefined) setBokeoTimelineTitleTh(homePoster.bokeoTimelineTitleTh);
       if (homePoster.hideBokeoTimeline !== undefined) setHideBokeoTimeline(homePoster.hideBokeoTimeline);
+      if (homePoster.vision !== undefined) setDonationVision(homePoster.vision);
+      if (homePoster.visionEn !== undefined) setDonationVisionEn(homePoster.visionEn);
+      if (homePoster.visionTh !== undefined) setDonationVisionTh(homePoster.visionTh);
+      if (homePoster.mission !== undefined) setDonationMission(homePoster.mission);
+      if (homePoster.missionEn !== undefined) setDonationMissionEn(homePoster.missionEn);
+      if (homePoster.missionTh !== undefined) setDonationMissionTh(homePoster.missionTh);
+      if (homePoster.hideVisionMission !== undefined) setHideVisionMissionState(homePoster.hideVisionMission);
     }
   }, [homePoster]);
+
+  // Debounced auto-sync to ensure any changes in About Poster sliders are immediately persisted to homePoster & localStorage
+  const hasInitializedAboutPosterRef = useRef(false);
+  useEffect(() => {
+    if (!hasInitializedAboutPosterRef.current) {
+      hasInitializedAboutPosterRef.current = true;
+      return;
+    }
+    if (adminSubTab !== 'about_poster') return;
+
+    const timer = setTimeout(() => {
+      const draft: HomePoster = {
+        title: homePoster?.title || 'HOPE BOKEO',
+        subtitle: homePoster?.subtitle || '',
+        description: homePoster?.description || '',
+        imageUrl: homePoster?.imageUrl || '',
+        ...(homePoster || {}),
+        bokeoPosterHeight: Number(bokeoPosterHeight),
+        bokeoPosterOverlayOpacity: Number(bokeoPosterOverlayOpacity),
+        bokeoPosterEdgeFade: Number(bokeoPosterEdgeFade),
+        bokeoPosterDim: Number(bokeoPosterDim),
+        bokeoPosterScale: Number(posterBokeoScale) || 100,
+        bokeoPosterPosition: posterBokeoPosition,
+        bokeoPosterFit: posterBokeoFit,
+        bokeoImageUrl: (posterBokeoImageUrl || '').trim(),
+        bokeoTitle: posterBokeoTitle,
+        bokeoTitleEn: posterBokeoTitleEn,
+        bokeoTitleTh: posterBokeoTitleTh,
+        bokeoDesc: posterBokeoDesc,
+        bokeoDescEn: posterBokeoDescEn,
+        bokeoDescTh: posterBokeoDescTh,
+        hideBokeoSection: hideBokeoSection,
+        bokeoTimeline: bokeoTimeline || [],
+        bokeoTimelineTitle: (bokeoTimelineTitle || '').trim(),
+        bokeoTimelineTitleEn: (bokeoTimelineTitleEn || '').trim(),
+        bokeoTimelineTitleTh: (bokeoTimelineTitleTh || '').trim(),
+        hideBokeoTimeline: hideBokeoTimeline,
+        vision: donationVision || '',
+        visionEn: donationVisionEn || '',
+        visionTh: donationVisionTh || '',
+        mission: donationMission || '',
+        missionEn: donationMissionEn || '',
+        missionTh: donationMissionTh || '',
+        hideVisionMission: hideVisionMissionState,
+      };
+
+      try {
+        localStorage.setItem('hb_cached_home_poster', JSON.stringify(draft));
+      } catch {}
+
+      if (onSaveHomePoster) {
+        onSaveHomePoster(draft).catch(() => {});
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [
+    adminSubTab,
+    bokeoPosterHeight,
+    bokeoPosterOverlayOpacity,
+    bokeoPosterEdgeFade,
+    bokeoPosterDim,
+    posterBokeoScale,
+    posterBokeoPosition,
+    posterBokeoFit,
+    posterBokeoImageUrl,
+    posterBokeoTitle,
+    posterBokeoTitleEn,
+    posterBokeoTitleTh,
+    posterBokeoDesc,
+    posterBokeoDescEn,
+    posterBokeoDescTh,
+    hideBokeoSection,
+    bokeoTimeline,
+    bokeoTimelineTitle,
+    bokeoTimelineTitleEn,
+    bokeoTimelineTitleTh,
+    hideBokeoTimeline,
+    donationVision,
+    donationVisionEn,
+    donationVisionTh,
+    donationMission,
+    donationMissionEn,
+    donationMissionTh,
+    hideVisionMissionState,
+  ]);
 
   const handleSaveHomePosterForm = async (e?: React.FormEvent) => {
     if (e && e.preventDefault) {
@@ -965,8 +1253,15 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     try {
       let finalImg = posterImgUrl;
       if (posterFile) {
-        const compressedBase64 = await compressImageFile(posterFile);
-        finalImg = compressedBase64;
+        try {
+          const uploadRes = await uploadFileDirectly(posterFile);
+          if (uploadRes?.url) {
+            finalImg = uploadRes.url;
+          }
+        } catch {
+          const compressedBase64 = await compressImageFile(posterFile, 2560, 0.95, 750000);
+          finalImg = compressedBase64;
+        }
       }
 
       const finalCoverList: string[] = [];
@@ -985,6 +1280,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       let finalBgImageUrl = appBgImageUrl;
 
       let updated: HomePoster = {
+        ...(homePoster || {}),
         title: posterTitle,
         titleEn: posterTitleEn,
         titleTh: posterTitleTh,
@@ -1007,6 +1303,19 @@ export const AdminTab: React.FC<AdminTabProps> = ({
         buttonText: posterBtnText,
         buttonTextEn: posterBtnTextEn,
         buttonTextTh: posterBtnTextTh,
+        posterLocationTag: posterLocationTag.trim(),
+        posterLocationTagEn: posterLocationTagEn.trim(),
+        posterLocationTagTh: posterLocationTagTh.trim(),
+        videoBtnText: posterVideoBtnText.trim(),
+        videoBtnTextEn: posterVideoBtnTextEn.trim(),
+        videoBtnTextTh: posterVideoBtnTextTh.trim(),
+        badgeTopText: posterBadgeTopText.trim(),
+        badgeTopTextEn: posterBadgeTopTextEn.trim(),
+        badgeTopTextTh: posterBadgeTopTextTh.trim(),
+        badgeBottomText: posterBadgeBottomText.trim(),
+        badgeBottomTextEn: posterBadgeBottomTextEn.trim(),
+        badgeBottomTextTh: posterBadgeBottomTextTh.trim(),
+        hideRightBadge: hideRightBadge,
         upcomingEventTitle: upcomingEventTitle.trim(),
         upcomingEventTitleEn: upcomingEventTitleEn.trim(),
         upcomingEventTitleTh: upcomingEventTitleTh.trim(),
@@ -1075,6 +1384,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
         bokeoTimelineTitleEn: (bokeoTimelineTitleEn || '').trim(),
         bokeoTimelineTitleTh: (bokeoTimelineTitleTh || '').trim(),
         hideBokeoTimeline: hideBokeoTimeline,
+        vision: donationVision || '',
+        visionEn: donationVisionEn || '',
+        visionTh: donationVisionTh || '',
+        mission: donationMission || '',
+        missionEn: donationMissionEn || '',
+        missionTh: donationMissionTh || '',
+        hideVisionMission: hideVisionMissionState,
       };
 
       updated = await optimizePosterForFirestore(updated);
@@ -1095,6 +1411,20 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
       if (onSaveHomePoster) {
         await onSaveHomePoster(updated);
+      }
+
+      // Also keep donationInfo in sync with vision & mission
+      if (onSaveDonationInfo && donationInfo) {
+        onSaveDonationInfo({
+          ...donationInfo,
+          vision: donationVision || '',
+          visionEn: donationVisionEn || '',
+          visionTh: donationVisionTh || '',
+          mission: donationMission || '',
+          missionEn: donationMissionEn || '',
+          missionTh: donationMissionTh || '',
+          hideVisionMission: hideVisionMissionState,
+        }).catch((err) => console.warn('Sync donationInfo vision/mission error:', err));
       }
       setIsEditingPoster(false);
       setPinSavedToast(
@@ -1252,38 +1582,39 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-10">
+    <div className="space-y-2 sm:space-y-4 animate-fade-in pb-8">
       {/* 1. MANAGEMENT HUB MAIN SELECTION VIEW (Shown ONLY when adminActiveFeature === 'hub') */}
       {adminActiveFeature === 'hub' && (
-        <div className="space-y-6 animate-fade-in">
-          {/* Hub Hero Header */}
-          <div className="bg-slate-900 text-white p-5 sm:p-7 rounded-3xl shadow-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] border border-slate-800">
-            <div>
-              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+        <div className="space-y-1.5 sm:space-y-3 animate-fade-in">
+          {/* Hub Header - Compact & matching other tabs with signature red accent */}
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xs xs:text-sm sm:text-base font-bold sm:font-black text-slate-900 dark:text-white tracking-tight border-l-2 sm:border-l-4 border-[#cc0000] pl-2 sm:pl-3 flex items-center gap-1.5 sm:gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#cc0000] shrink-0" />
+              <span>
                 {language === 'lo' ? 'ສູນກາງການຈັດການ Hope Bokeo' : 'Hope Bokeo Management Hub'}
-              </h2>
-            </div>
+              </span>
+            </h2>
           </div>
 
-          {/* 3 Main Room Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 sm:gap-6">
+          {/* 3 Main Room Cards Grid - Compact height & tighter spacing on mobile */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-1.5 sm:gap-2.5 md:gap-3.5">
             {/* Room 1 Card: Settings & Team */}
             <div
               onClick={() => setAdminActiveFeature('settings')}
-              className={`bg-white dark:bg-slate-800 rounded-3xl p-6 border-2 transition-all duration-300 flex flex-col justify-between shadow-md cursor-pointer ${
+              className={`bg-white dark:bg-slate-800 rounded-none py-1.5 px-2 sm:py-2.5 sm:px-3 border transition-all duration-300 flex flex-col justify-between shadow-xs cursor-pointer ${
                 isSettingsUnlocked
                   ? 'border-emerald-300 dark:border-emerald-700/60 shadow-emerald-500/5'
                   : 'border-slate-200 dark:border-slate-700 hover:border-[#cc0000] dark:hover:border-red-500'
               }`}
             >
               <div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-red-50 dark:bg-red-950/80 text-[#cc0000] dark:text-red-400 flex items-center justify-center shadow-inner shrink-0">
-                      <Settings className="w-6 h-6" />
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                    <div className="w-5.5 h-5.5 sm:w-7 sm:h-7 rounded-none bg-red-50 dark:bg-red-950/80 text-[#cc0000] dark:text-red-400 flex items-center justify-center shrink-0">
+                      <Settings className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     </div>
-                    <div>
-                      <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-white leading-tight">
+                    <div className="min-w-0">
+                      <h3 className="text-[11px] sm:text-xs font-black text-slate-800 dark:text-white leading-tight truncate">
                         {language === 'lo' ? '1. ⚙️ ການຕັ້ງຄ່າລະບົບ & ທີມງານ' : '1. Settings & Team Hub'}
                       </h3>
                     </div>
@@ -1295,17 +1626,17 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                         e.stopPropagation();
                         handleLockSettings();
                       }}
-                      className="p-2 rounded-xl text-emerald-600 hover:text-red-600 bg-emerald-50 hover:bg-red-50 dark:bg-emerald-950/40 dark:hover:bg-red-950/60 border border-emerald-200 dark:border-emerald-800 transition shrink-0"
+                      className="p-0.5 sm:p-1 rounded-none text-emerald-600 hover:text-red-600 bg-emerald-50 hover:bg-red-50 dark:bg-emerald-950/40 dark:hover:bg-red-950/60 border border-emerald-200 dark:border-emerald-800 transition shrink-0"
                       title={language === 'lo' ? 'ລັອກຫ້ອງຕັ້ງຄ່າ' : 'Lock Settings'}
                     >
-                      <Lock className="w-4 h-4" />
+                      <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                     </button>
                   )}
                 </div>
               </div>
 
               {/* Enter / Unlock Form (Passcode on Left, Key button on Right) */}
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 mt-4">
+              <div className="pt-1 border-t border-slate-100 dark:border-slate-700/60 mt-1">
                 {!isSettingsUnlocked ? (
                   <form
                     onSubmit={(e) => {
@@ -1314,9 +1645,9 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       handleVerifySettingsCode(e);
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="space-y-1.5"
+                    className="space-y-0.5"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       <div className="relative flex-1">
                         <input
                           type={showSettingsCode ? 'text' : 'password'}
@@ -1327,29 +1658,29 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           }}
                           placeholder={language === 'lo' ? 'ປ້ອນລະຫັດ 8 ຫຼັກ...' : 'Enter 8-digit passcode...'}
                           maxLength={20}
-                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-xl px-3.5 py-2.5 pr-9 text-xs font-mono font-bold tracking-widest text-slate-900 dark:text-white focus:border-[#cc0000] focus:ring-2 focus:ring-red-500/20 outline-none transition"
+                          className="w-full h-6 sm:h-7.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-none px-1.5 sm:px-2 py-0 pr-6 text-[11px] sm:text-xs font-mono font-bold tracking-widest text-slate-900 dark:text-white focus:border-[#cc0000] focus:ring-1 focus:ring-red-500/20 outline-none transition"
                         />
                         <button
                           type="button"
                           onClick={() => setShowSettingsCode(!showSettingsCode)}
-                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                          className="absolute right-1 top-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                           title={showSettingsCode ? 'Hide' : 'Show'}
                         >
-                          {showSettingsCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          {showSettingsCode ? <EyeOff className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> : <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />}
                         </button>
                       </div>
 
                       <button
                         type="submit"
-                        className="h-10 w-11 rounded-xl bg-gradient-to-r from-red-600 to-[#cc0000] hover:from-red-700 hover:to-red-800 text-white shadow-md transition flex items-center justify-center shrink-0 cursor-pointer active:scale-95"
+                        className="h-6 w-6 sm:h-7.5 sm:w-7.5 rounded-none bg-gradient-to-r from-red-600 to-[#cc0000] hover:from-red-700 hover:to-red-800 text-white shadow-xs transition flex items-center justify-center shrink-0 cursor-pointer active:scale-95"
                         title={language === 'lo' ? 'ປົດລັອກ' : 'Unlock'}
                       >
-                        <KeyRound className="w-4 h-4" />
+                        <KeyRound className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                       </button>
                     </div>
 
                     {settingsCodeError && (
-                      <p className="text-[11px] text-red-600 dark:text-red-400 font-bold px-1">
+                      <p className="text-[9px] sm:text-[10px] text-red-600 dark:text-red-400 font-bold px-0.5">
                         {settingsCodeError}
                       </p>
                     )}
@@ -1361,11 +1692,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       e.stopPropagation();
                       setAdminActiveFeature('settings');
                     }}
-                    className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-red-600 to-[#cc0000] hover:from-red-700 hover:to-red-800 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 group cursor-pointer active:scale-98"
+                    className="w-full py-0.75 sm:py-1 px-2 sm:px-2.5 rounded-none bg-gradient-to-r from-red-600 to-[#cc0000] hover:from-red-700 hover:to-red-800 text-white font-bold text-[11px] sm:text-xs shadow-xs transition-all flex items-center justify-center gap-1 group cursor-pointer active:scale-98"
                   >
-                    <Settings className="w-3.5 h-3.5" />
+                    <Settings className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                     <span>{language === 'lo' ? 'ເຂົ້າສູ່ຫ້ອງຕັ້ງຄ່າ' : 'Enter Settings Room'}</span>
-                    <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    <ChevronRight className="w-2.5 h-2.5 sm:w-3 sm:h-3 group-hover:translate-x-0.5 transition-transform" />
                   </button>
                 )}
               </div>
@@ -1374,15 +1705,15 @@ export const AdminTab: React.FC<AdminTabProps> = ({
             {/* Room 2 Card: Church Portal Update */}
             <div
               onClick={() => setAdminActiveFeature('church_update')}
-              className="bg-white dark:bg-slate-800 rounded-3xl p-6 border-2 border-slate-200 dark:border-slate-700 hover:border-amber-500 dark:hover:border-amber-500 transition-all duration-300 flex flex-col justify-between shadow-md cursor-pointer"
+              className="bg-white dark:bg-slate-800 rounded-none py-1.5 px-2 sm:py-2.5 sm:px-3 border border-slate-200 dark:border-slate-700 hover:border-amber-500 dark:hover:border-amber-500 transition-all duration-300 flex flex-col justify-between shadow-xs cursor-pointer"
             >
               <div>
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-inner shrink-0">
-                    <Church className="w-6 h-6" />
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <div className="w-5.5 h-5.5 sm:w-7 sm:h-7 rounded-none bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                    <Church className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   </div>
-                  <div>
-                    <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-white leading-tight">
+                  <div className="min-w-0">
+                    <h3 className="text-[11px] sm:text-xs font-black text-slate-800 dark:text-white leading-tight truncate">
                       {language === 'lo' ? '2. ⛪ ອັບເດດຂໍ້ມູນຄຣິດຕະຈັກ' : '2. Church Update Portal'}
                     </h3>
                   </div>
@@ -1390,18 +1721,18 @@ export const AdminTab: React.FC<AdminTabProps> = ({
               </div>
 
               {/* Enter Button */}
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 mt-4">
+              <div className="pt-1 border-t border-slate-100 dark:border-slate-700/60 mt-1">
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setAdminActiveFeature('church_update');
                   }}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 group cursor-pointer active:scale-98"
+                  className="w-full py-0.75 sm:py-1 px-2 sm:px-2.5 rounded-none bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-[11px] sm:text-xs shadow-xs transition-all flex items-center justify-center gap-1 group cursor-pointer active:scale-98"
                 >
-                  <Church className="w-3.5 h-3.5" />
+                  <Church className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                   <span>{language === 'lo' ? 'ເຂົ້າສູ່ພອດທັລຄຣິດຕະຈັກ' : 'Enter Church Portal'}</span>
-                  <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  <ChevronRight className="w-2.5 h-2.5 sm:w-3 sm:h-3 group-hover:translate-x-0.5 transition-transform" />
                 </button>
               </div>
             </div>
@@ -1409,20 +1740,20 @@ export const AdminTab: React.FC<AdminTabProps> = ({
             {/* Room 3 Card: Finance & Support */}
             <div
               onClick={() => setAdminActiveFeature('finance')}
-              className={`bg-white dark:bg-slate-800 rounded-3xl p-6 border-2 transition-all duration-300 flex flex-col justify-between shadow-md cursor-pointer ${
+              className={`bg-white dark:bg-slate-800 rounded-none py-1.5 px-2 sm:py-2.5 sm:px-3 border transition-all duration-300 flex flex-col justify-between shadow-xs cursor-pointer ${
                 isFinanceUnlocked
                   ? 'border-emerald-300 dark:border-emerald-700/60 shadow-emerald-500/5'
                   : 'border-slate-200 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500'
               }`}
             >
               <div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-inner shrink-0">
-                      <Wallet className="w-6 h-6" />
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                    <div className="w-5.5 h-5.5 sm:w-7 sm:h-7 rounded-none bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                      <Wallet className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     </div>
-                    <div>
-                      <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-white leading-tight">
+                    <div className="min-w-0">
+                      <h3 className="text-[11px] sm:text-xs font-black text-slate-800 dark:text-white leading-tight truncate">
                         {language === 'lo' ? '3. 💰 ຈັດການ & ສະແດງລາຍງານການເງິນ' : '3. Finance Overview & Ledger'}
                       </h3>
                     </div>
@@ -1434,17 +1765,17 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                         e.stopPropagation();
                         handleLockFinance();
                       }}
-                      className="p-2 rounded-xl text-blue-600 hover:text-red-600 bg-blue-50 hover:bg-red-50 dark:bg-blue-950/40 dark:hover:bg-red-950/60 border border-blue-200 dark:border-blue-800 transition shrink-0"
+                      className="p-0.5 sm:p-1 rounded-none text-blue-600 hover:text-red-600 bg-blue-50 hover:bg-red-50 dark:bg-blue-950/40 dark:hover:bg-red-950/60 border border-blue-200 dark:border-blue-800 transition shrink-0"
                       title={language === 'lo' ? 'ລັອກຫ້ອງການເງິນ' : 'Lock Finance'}
                     >
-                      <Lock className="w-4 h-4" />
+                      <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                     </button>
                   )}
                 </div>
               </div>
 
               {/* Enter / Unlock Form (Passcode on Left, Key button on Right) */}
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 mt-4">
+              <div className="pt-1 border-t border-slate-100 dark:border-slate-700/60 mt-1">
                 {!isFinanceUnlocked ? (
                   <form
                     onSubmit={(e) => {
@@ -1453,9 +1784,9 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       handleVerifyFinanceCode(e);
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="space-y-1.5"
+                    className="space-y-0.5"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       <div className="relative flex-1">
                         <input
                           type={showFinanceCode ? 'text' : 'password'}
@@ -1466,29 +1797,29 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           }}
                           placeholder={language === 'lo' ? 'ປ້ອນລະຫັດ 8 ຫຼັກ...' : 'Enter 8-digit passcode...'}
                           maxLength={20}
-                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-xl px-3.5 py-2.5 pr-9 text-xs font-mono font-bold tracking-widest text-slate-900 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition"
+                          className="w-full h-6 sm:h-7.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-none px-1.5 sm:px-2 py-0 pr-6 text-[11px] sm:text-xs font-mono font-bold tracking-widest text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 outline-none transition"
                         />
                         <button
                           type="button"
                           onClick={() => setShowFinanceCode(!showFinanceCode)}
-                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                          className="absolute right-1 top-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                           title={showFinanceCode ? 'Hide' : 'Show'}
                         >
-                          {showFinanceCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          {showFinanceCode ? <EyeOff className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> : <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />}
                         </button>
                       </div>
 
                       <button
                         type="submit"
-                        className="h-10 w-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-md transition flex items-center justify-center shrink-0 cursor-pointer active:scale-95"
+                        className="h-6 w-6 sm:h-7.5 sm:w-7.5 rounded-none bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition flex items-center justify-center shrink-0 cursor-pointer active:scale-95"
                         title={language === 'lo' ? 'ປົດລັອກ' : 'Unlock'}
                       >
-                        <KeyRound className="w-4 h-4" />
+                        <KeyRound className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                       </button>
                     </div>
 
                     {financeCodeError && (
-                      <p className="text-[11px] text-red-600 dark:text-red-400 font-bold px-1">
+                      <p className="text-[9px] sm:text-[10px] text-red-600 dark:text-red-400 font-bold px-0.5">
                         {financeCodeError}
                       </p>
                     )}
@@ -1500,11 +1831,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       e.stopPropagation();
                       setAdminActiveFeature('finance');
                     }}
-                    className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 group cursor-pointer active:scale-98"
+                    className="w-full py-0.75 sm:py-1 px-2 sm:px-2.5 rounded-none bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-[11px] sm:text-xs shadow-xs transition-all flex items-center justify-center gap-1 group cursor-pointer active:scale-98"
                   >
-                    <Wallet className="w-3.5 h-3.5" />
+                    <Wallet className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                     <span>{language === 'lo' ? 'ເຂົ້າເບິ່ງລາຍງານການເງິນ' : 'View Finance Ledger'}</span>
-                    <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    <ChevronRight className="w-2.5 h-2.5 sm:w-3 sm:h-3 group-hover:translate-x-0.5 transition-transform" />
                   </button>
                 )}
               </div>
@@ -1519,15 +1850,15 @@ export const AdminTab: React.FC<AdminTabProps> = ({
           {/* ROOM 2 CONTENT: Church Update Portal (NO OUTER PASSWORD) */}
           {adminActiveFeature === 'church_update' && (
             <div className="animate-fade-in space-y-4">
-              <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-3 px-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+              <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-2.5 sm:p-3 px-3 sm:px-4 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm">
                 <button
                   type="button"
                   onClick={() => setAdminActiveFeature('hub')}
-                  className="p-2 sm:p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl transition flex items-center justify-center group active:scale-95 cursor-pointer shadow-xs border border-slate-200/60 dark:border-slate-600"
+                  className="p-1.5 sm:p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-none transition flex items-center justify-center group active:scale-95 cursor-pointer shadow-xs border border-slate-200/60 dark:border-slate-600"
                   title={language === 'lo' ? 'ກັບຄືນສູ່ສູນກາງ Admin' : 'Back to Admin Hub'}
                   aria-label="Back"
                 >
-                  <ArrowLeft className="w-5 h-5 group-hover:-translate-x-0.5 transition-transform text-amber-500" />
+                  <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform text-amber-500" />
                 </button>
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
                   <Church className="w-4 h-4 text-amber-500" />
@@ -1711,15 +2042,15 @@ export const AdminTab: React.FC<AdminTabProps> = ({
               ) : (
                 <div className="space-y-4">
                   {/* Top Bar with Back to Admin Hub button */}
-                  <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-3 px-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                  <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-2.5 sm:p-3 px-3 sm:px-4 rounded-none border border-slate-200 dark:border-slate-700 shadow-sm">
                     <button
                       type="button"
                       onClick={() => setAdminActiveFeature('hub')}
-                      className="p-2 sm:p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl transition flex items-center justify-center group active:scale-95 cursor-pointer shadow-xs border border-slate-200/60 dark:border-slate-600"
+                      className="p-1.5 sm:p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-none transition flex items-center justify-center group active:scale-95 cursor-pointer shadow-xs border border-slate-200/60 dark:border-slate-600"
                       title={language === 'lo' ? 'ກັບຄືນສູ່ສູນກາງ Admin' : 'Back to Admin Hub'}
                       aria-label="Back"
                     >
-                      <ArrowLeft className="w-5 h-5 group-hover:-translate-x-0.5 transition-transform text-[#cc0000]" />
+                      <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform text-[#cc0000]" />
                     </button>
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
@@ -1732,7 +2063,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           handleLockSettings();
                           setAdminActiveFeature('hub');
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900/60 text-[#cc0000] text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-red-200 dark:border-red-900/60"
+                        className="px-2.5 py-1 rounded-none bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900/60 text-[#cc0000] text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-red-200 dark:border-red-900/60"
                         title={language === 'lo' ? 'ລັອກຫ້ອງຕັ້ງຄ່າ' : 'Lock Settings'}
                       >
                         <Lock className="w-3.5 h-3.5" />
@@ -1773,103 +2104,144 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                 type="button"
                 onClick={() => {
                   setAdminMainTab('home');
-                  if (adminSubTab !== 'poster' && adminSubTab !== 'upcoming' && adminSubTab !== 'events') {
+                  setOpenMenuGroup((prev) => (prev === 'home' ? null : 'home'));
+                  if (adminSubTab !== 'poster' && adminSubTab !== 'upcoming' && adminSubTab !== 'events' && adminSubTab !== 'communities' && adminSubTab !== 'prayer') {
                     setAdminSubTab('poster');
                   }
                 }}
-                className={`w-full p-2.5 rounded-xl text-left font-bold text-xs flex items-center justify-between transition ${
+                className={`w-full p-2.5 rounded-xl text-left font-extrabold text-xs flex items-center justify-between transition cursor-pointer ${
                   adminMainTab === 'home'
                     ? 'bg-[#cc0000] text-white shadow-sm'
-                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700/60'
+                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700/60'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
                   <ImageIcon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{language === 'lo' ? '1. ໜ້າຫຼັກ' : '1. Home Tab'}</span>
+                  <span className="truncate font-extrabold">{language === 'lo' ? '1. ໜ້າຫຼັກ' : '1. Home Tab'}</span>
                 </div>
-                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${adminMainTab === 'home' ? 'rotate-90' : ''}`} />
+                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${openMenuGroup === 'home' ? 'rotate-90' : ''}`} />
               </button>
 
-              {adminMainTab === 'home' && (
+              {openMenuGroup === 'home' && (
                 <div className="pl-2 space-y-1 pt-1 border-l-2 border-red-200 dark:border-red-900/60 ml-2.5">
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('poster')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'poster'
-                        ? 'bg-purple-100 text-purple-900 dark:bg-purple-950/80 dark:text-purple-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-purple-100 text-purple-900 dark:bg-purple-950/80 dark:text-purple-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '🖼️ ໂປສເຕີ & ຮູບສະໄລ້' : 'Poster & Hero'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '🖼️ ການຕັ້ງຄ່າໂປສເຕີ' : 'Poster Settings'}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('upcoming')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'upcoming'
-                        ? 'bg-rose-100 text-rose-900 dark:bg-rose-950/80 dark:text-rose-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-rose-100 text-rose-900 dark:bg-rose-950/80 dark:text-rose-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '📢 ງານທີ່ຈະມາເຖິງ & ແຈ້ງການ' : 'Upcoming Event & Announcement'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '📢 ງານທີ່ຈະມາເຖິງ & ແຈ້ງການ' : 'Upcoming Event & Announcement'}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('events')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'events'
-                        ? 'bg-indigo-100 text-indigo-900 dark:bg-indigo-950/80 dark:text-indigo-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-indigo-100 text-indigo-900 dark:bg-indigo-950/80 dark:text-indigo-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '🎉 ຈັດການກິດຈະກຳ' : 'Events & News'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '🎉 ຈັດການກິດຈະກຳ' : 'Events & News'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAdminSubTab('communities')}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
+                      adminSubTab === 'communities'
+                        ? 'bg-rose-100 text-rose-900 dark:bg-rose-950/80 dark:text-rose-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                    <span className="truncate font-bold">{language === 'lo' ? '📍 ຂໍ້ຄວາມ Communities & ເລື່ອງລາວ' : 'Communities & Stories'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAdminSubTab('prayer')}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
+                      adminSubTab === 'prayer'
+                        ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    <span className="truncate font-bold">{language === 'lo' ? '🙏 ຈັດການໜ້າອະທິຖານ' : 'Prayer Settings'}</span>
                   </button>
                 </div>
               )}
             </div>
 
-            {/* 2. Dashboard Settings */}
+            {/* 2. Dashboard / Insights Settings */}
             <div className="space-y-1">
               <button
                 type="button"
                 onClick={() => {
                   setAdminMainTab('dashboard');
-                  if (adminSubTab !== 'pins') {
-                    setAdminSubTab('pins');
+                  setOpenMenuGroup((prev) => (prev === 'dashboard' ? null : 'dashboard'));
+                  if (adminSubTab !== 'insights_poster' && adminSubTab !== 'pins') {
+                    setAdminSubTab('insights_poster');
                   }
                 }}
-                className={`w-full p-2.5 rounded-xl text-left font-bold text-xs flex items-center justify-between transition ${
+                className={`w-full p-2.5 rounded-xl text-left font-extrabold text-xs flex items-center justify-between transition cursor-pointer ${
                   adminMainTab === 'dashboard'
                     ? 'bg-[#cc0000] text-white shadow-sm'
-                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700/60'
+                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700/60'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
                   <LayoutGrid className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{language === 'lo' ? '2. ການຕັ້ງຄ່າຫ້ອງຂໍ້ມູນ' : '2. Dashboard Tab'}</span>
+                  <span className="truncate font-extrabold">{language === 'lo' ? '2. ການຕັ້ງຄ່າຫ້ອງຂໍ້ມູນ' : '2. Insights / Dashboard Tab'}</span>
                 </div>
-                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${adminMainTab === 'dashboard' ? 'rotate-90' : ''}`} />
+                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${openMenuGroup === 'dashboard' ? 'rotate-90' : ''}`} />
               </button>
 
-              {adminMainTab === 'dashboard' && (
+              {openMenuGroup === 'dashboard' && (
                 <div className="pl-2 space-y-1 pt-1 border-l-2 border-red-200 dark:border-red-900/60 ml-2.5">
                   <button
                     type="button"
+                    onClick={() => setAdminSubTab('insights_poster')}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
+                      adminSubTab === 'insights_poster'
+                        ? 'bg-purple-100 text-purple-900 dark:bg-purple-950/80 dark:text-purple-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
+                    <span className="truncate font-bold">{language === 'lo' ? '🖼️ ການຕັ້ງຄ່າໂພສເຕີຫ້ອງຂໍ້ມູນ' : 'Insights Poster Settings'}</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setAdminSubTab('pins')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'pins'
-                        ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '🔑 ລະຫັດ PIN ຄຣິດສະຕະຈັກ' : 'Church PIN Codes'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '🔑 ລະຫັດ PIN ຄຣິດສະຕະຈັກ' : 'Church PIN Codes'}</span>
                   </button>
                 </div>
               )}
@@ -1881,49 +2253,50 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                 type="button"
                 onClick={() => {
                   setAdminMainTab('churches');
+                  setOpenMenuGroup((prev) => (prev === 'churches' ? null : 'churches'));
                   if (adminSubTab !== 'villages' && adminSubTab !== 'maps') {
                     setAdminSubTab('villages');
                   }
                 }}
-                className={`w-full p-2.5 rounded-xl text-left font-bold text-xs flex items-center justify-between transition ${
+                className={`w-full p-2.5 rounded-xl text-left font-extrabold text-xs flex items-center justify-between transition cursor-pointer ${
                   adminMainTab === 'churches'
                     ? 'bg-[#cc0000] text-white shadow-sm'
-                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700/60'
+                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700/60'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
                   <Building className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{language === 'lo' ? '3. ອັບເດດຂໍ້ມູນຄຣິດຕະຈັກ' : '3. Church & Map'}</span>
+                  <span className="truncate font-extrabold">{language === 'lo' ? '3. ອັບເດດຂໍ້ມູນຄຣິດຕະຈັກ' : '3. Church & Map'}</span>
                 </div>
-                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${adminMainTab === 'churches' ? 'rotate-90' : ''}`} />
+                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${openMenuGroup === 'churches' ? 'rotate-90' : ''}`} />
               </button>
 
-              {adminMainTab === 'churches' && (
+              {openMenuGroup === 'churches' && (
                 <div className="pl-2 space-y-1 pt-1 border-l-2 border-red-200 dark:border-red-900/60 ml-2.5">
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('villages')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'villages'
-                        ? 'bg-red-100 text-red-900 dark:bg-red-950/80 dark:text-red-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-red-100 text-red-900 dark:bg-red-950/80 dark:text-red-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-[#cc0000] shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '⛪ ຂໍ້ມູນບ້ານ/ຄຣິດສະຕະຈັກ' : 'Village Directory'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '⛪ ຂໍ້ມູນບ້ານ/ຄຣິດສະຕະຈັກ' : 'Village Directory'}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('maps')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'maps'
-                        ? 'bg-cyan-100 text-cyan-900 dark:bg-cyan-950/80 dark:text-cyan-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-cyan-100 text-cyan-900 dark:bg-cyan-950/80 dark:text-cyan-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '🗺️ Google Maps & ຮູບພາບ' : 'Google Maps & Photos'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '🗺️ Google Maps & ຮູບພາບ' : 'Google Maps & Photos'}</span>
                   </button>
                 </div>
               )}
@@ -1935,62 +2308,63 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                 type="button"
                 onClick={() => {
                   setAdminMainTab('about');
+                  setOpenMenuGroup((prev) => (prev === 'about' ? null : 'about'));
                   if (adminSubTab !== 'about_poster' && adminSubTab !== 'teams' && adminSubTab !== 'donation') {
                     setAdminSubTab('about_poster');
                   }
                 }}
-                className={`w-full p-2.5 rounded-xl text-left font-bold text-xs flex items-center justify-between transition ${
+                className={`w-full p-2.5 rounded-xl text-left font-extrabold text-xs flex items-center justify-between transition cursor-pointer ${
                   adminMainTab === 'about'
                     ? 'bg-[#cc0000] text-white shadow-sm'
-                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700/60'
+                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700/60'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
                   <Users className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{language === 'lo' ? '4. ກ່ຽວກັບພວກເຮົາ' : '4. About Us'}</span>
+                  <span className="truncate font-extrabold">{language === 'lo' ? '4. ກ່ຽວກັບພວກເຮົາ' : '4. About Us'}</span>
                 </div>
-                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${adminMainTab === 'about' ? 'rotate-90' : ''}`} />
+                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${openMenuGroup === 'about' ? 'rotate-90' : ''}`} />
               </button>
 
-              {adminMainTab === 'about' && (
+              {openMenuGroup === 'about' && (
                 <div className="pl-2 space-y-1 pt-1 border-l-2 border-red-200 dark:border-red-900/60 ml-2.5">
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('about_poster')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'about_poster'
-                        ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '🖼️ ໂພສເຕີ & ຂໍ້ມູນ HOPE BOKEO' : '🖼️ About Poster & Story'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '🖼️ ໂພສເຕີ & ຂໍ້ມູນ HOPE BOKEO' : '🖼️ About Poster & Story'}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('teams')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'teams'
-                        ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '👥 ທີມງານ & ບຸກຄະລາກອນ' : 'Ministry Staff & Team'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '👥 ທີມງານ & ບຸກຄະລາກອນ' : 'Ministry Staff & Team'}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('donation')}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition flex items-center gap-2 cursor-pointer ${
                       adminSubTab === 'donation'
-                        ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300 font-extrabold'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                        ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300 font-black'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                    <span className="truncate">{language === 'lo' ? '💳 ບໍລິຈາກ & ຊ່ອງທາງອະທິຖານ' : 'Donation & Prayer'}</span>
+                    <span className="truncate font-bold">{language === 'lo' ? '💳 ບໍລິຈາກ & ຊ່ອງທາງອະທິຖານ' : 'Donation & Prayer'}</span>
                   </button>
                 </div>
               )}
@@ -2002,19 +2376,20 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                 type="button"
                 onClick={() => {
                   setAdminMainTab('finance' as any);
+                  setOpenMenuGroup((prev) => (prev === 'finance' ? null : 'finance'));
                   setAdminSubTab('finance' as any);
                 }}
-                className={`w-full p-2.5 rounded-xl text-left font-bold text-xs flex items-center justify-between transition ${
+                className={`w-full p-2.5 rounded-xl text-left font-extrabold text-xs flex items-center justify-between transition cursor-pointer ${
                   adminMainTab === ('finance' as any)
                     ? 'bg-[#cc0000] text-white shadow-sm'
-                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700/60'
+                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700/60 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700/60'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
                   <Wallet className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{language === 'lo' ? '5. ລະບົບການເງິນ & ທີມງານ' : '5. Finance & Support'}</span>
+                  <span className="truncate font-extrabold">{language === 'lo' ? '5. ລະບົບການເງິນ & ທີມງານ' : '5. Finance & Support'}</span>
                 </div>
-                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${adminMainTab === ('finance' as any) ? 'rotate-90' : ''}`} />
+                <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${openMenuGroup === 'finance' ? 'rotate-90' : ''}`} />
               </button>
             </div>
           </div>
@@ -2028,6 +2403,19 @@ export const AdminTab: React.FC<AdminTabProps> = ({
           <Check className="w-4 h-4 text-amber-600 shrink-0" />
           <span>{pinSavedToast}</span>
         </div>
+      )}
+
+      {/* Admin Sub-Tab: Insights Poster Management */}
+      {adminSubTab === 'insights_poster' && (
+        <InsightsPosterSettingsSection
+          language={language}
+          homePoster={homePoster}
+          onSavePoster={async (updated) => {
+            if (onSaveHomePoster) {
+              await onSaveHomePoster(updated);
+            }
+          }}
+        />
       )}
 
       {/* Admin Sub-Tab 1: Church PIN Management */}
@@ -2588,10 +2976,10 @@ export const AdminTab: React.FC<AdminTabProps> = ({
             <div>
               <h3 className="font-bold text-base text-slate-800 dark:text-white flex items-center gap-2">
                 <ImageIcon className="w-5 h-5 text-purple-600" />
-                <span>{language === 'lo' ? 'ແກ້ໄຂຮູບໂປສເຕີ ແລະ ຫົວຂໍ້ຢູ່ໜ້າຫຼັກ' : 'Edit Home Poster & Hero Text'}</span>
+                <span>{language === 'lo' ? 'ການຕັ້ງຄ່າໂປສເຕີ' : 'Poster Settings'}</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                {language === 'lo' ? 'ປ່ຽນແປງຂໍ້ມູນໂຄສະນາ/ໂປສເຕີ ແລະ ຫົວຂໍ້ໃຫຍ່ທີ່ຈະປະກົດຢູ່ໜ້າຫຼັກຂອງເວັບໄຊ' : 'Update the top banner image, title, and description displayed on the Home tab.'}
+                {language === 'lo' ? 'ແກ້ໄຂຮູບໂປສເຕີ, ຮູບສະໄລ້, ຫົວຂໍ້ໃຫຍ່ ແລະ ຂໍ້ຄວາມທີ່ຈະປະກົດຢູ່ໜ້າຫຼັກຂອງເວັບໄຊ' : 'Manage hero poster images, slider, titles, and text on the Home tab.'}
               </p>
             </div>
             {/* Eye toggle button at right of header */}
@@ -2670,6 +3058,36 @@ export const AdminTab: React.FC<AdminTabProps> = ({
             setPosterVideoUrl={setPosterVideoUrl}
             posterBtnText={posterBtnText}
             setPosterBtnText={setPosterBtnText}
+            posterBtnTextEn={posterBtnTextEn}
+            setPosterBtnTextEn={setPosterBtnTextEn}
+            posterBtnTextTh={posterBtnTextTh}
+            setPosterBtnTextTh={setPosterBtnTextTh}
+            posterLocationTag={posterLocationTag}
+            setPosterLocationTag={setPosterLocationTag}
+            posterLocationTagEn={posterLocationTagEn}
+            setPosterLocationTagEn={setPosterLocationTagEn}
+            posterLocationTagTh={posterLocationTagTh}
+            setPosterLocationTagTh={setPosterLocationTagTh}
+            posterVideoBtnText={posterVideoBtnText}
+            setPosterVideoBtnText={setPosterVideoBtnText}
+            posterVideoBtnTextEn={posterVideoBtnTextEn}
+            setPosterVideoBtnTextEn={setPosterVideoBtnTextEn}
+            posterVideoBtnTextTh={posterVideoBtnTextTh}
+            setPosterVideoBtnTextTh={setPosterVideoBtnTextTh}
+            posterBadgeTopText={posterBadgeTopText}
+            setPosterBadgeTopText={setPosterBadgeTopText}
+            posterBadgeTopTextEn={posterBadgeTopTextEn}
+            setPosterBadgeTopTextEn={setPosterBadgeTopTextEn}
+            posterBadgeTopTextTh={posterBadgeTopTextTh}
+            setPosterBadgeTopTextTh={setPosterBadgeTopTextTh}
+            posterBadgeBottomText={posterBadgeBottomText}
+            setPosterBadgeBottomText={setPosterBadgeBottomText}
+            posterBadgeBottomTextEn={posterBadgeBottomTextEn}
+            setPosterBadgeBottomTextEn={setPosterBadgeBottomTextEn}
+            posterBadgeBottomTextTh={posterBadgeBottomTextTh}
+            setPosterBadgeBottomTextTh={setPosterBadgeBottomTextTh}
+            hideRightBadge={hideRightBadge}
+            setHideRightBadge={setHideRightBadge}
             appBgColor={appBgColor}
             setAppBgColor={setAppBgColor}
             appBgImageUrl={appBgImageUrl}
@@ -2843,6 +3261,36 @@ export const AdminTab: React.FC<AdminTabProps> = ({
             setPosterVideoUrl={setPosterVideoUrl}
             posterBtnText={posterBtnText}
             setPosterBtnText={setPosterBtnText}
+            posterBtnTextEn={posterBtnTextEn}
+            setPosterBtnTextEn={setPosterBtnTextEn}
+            posterBtnTextTh={posterBtnTextTh}
+            setPosterBtnTextTh={setPosterBtnTextTh}
+            posterLocationTag={posterLocationTag}
+            setPosterLocationTag={setPosterLocationTag}
+            posterLocationTagEn={posterLocationTagEn}
+            setPosterLocationTagEn={setPosterLocationTagEn}
+            posterLocationTagTh={posterLocationTagTh}
+            setPosterLocationTagTh={setPosterLocationTagTh}
+            posterVideoBtnText={posterVideoBtnText}
+            setPosterVideoBtnText={setPosterVideoBtnText}
+            posterVideoBtnTextEn={posterVideoBtnTextEn}
+            setPosterVideoBtnTextEn={setPosterVideoBtnTextEn}
+            posterVideoBtnTextTh={posterVideoBtnTextTh}
+            setPosterVideoBtnTextTh={setPosterVideoBtnTextTh}
+            posterBadgeTopText={posterBadgeTopText}
+            setPosterBadgeTopText={setPosterBadgeTopText}
+            posterBadgeTopTextEn={posterBadgeTopTextEn}
+            setPosterBadgeTopTextEn={setPosterBadgeTopTextEn}
+            posterBadgeTopTextTh={posterBadgeTopTextTh}
+            setPosterBadgeTopTextTh={setPosterBadgeTopTextTh}
+            posterBadgeBottomText={posterBadgeBottomText}
+            setPosterBadgeBottomText={setPosterBadgeBottomText}
+            posterBadgeBottomTextEn={posterBadgeBottomTextEn}
+            setPosterBadgeBottomTextEn={setPosterBadgeBottomTextEn}
+            posterBadgeBottomTextTh={posterBadgeBottomTextTh}
+            setPosterBadgeBottomTextTh={setPosterBadgeBottomTextTh}
+            hideRightBadge={hideRightBadge}
+            setHideRightBadge={setHideRightBadge}
             appBgColor={appBgColor}
             setAppBgColor={setAppBgColor}
             appBgImageUrl={appBgImageUrl}
@@ -2948,12 +3396,38 @@ export const AdminTab: React.FC<AdminTabProps> = ({
         </div>
       )}
 
+      {/* 5.1. Communities, Churches & Field Stories Content Management View */}
+      {adminSubTab === 'communities' && (
+        <CommunitiesSettingsSection
+          language={language}
+          homePoster={homePoster}
+          onSavePoster={async (updated) => {
+            if (onSaveHomePoster) {
+              await onSaveHomePoster(updated);
+            }
+          }}
+        />
+      )}
+
+      {/* 5.2. Prayer Needs & Settings Management View */}
+      {adminSubTab === 'prayer' && (
+        <PrayerSettingsSection
+          language={language}
+          homePoster={homePoster}
+          onSavePoster={async (updated) => {
+            if (onSaveHomePoster) {
+              await onSaveHomePoster(updated);
+            }
+          }}
+        />
+      )}
+
       {/* 6. Maps & Church Images Management View */}
       {adminSubTab === 'maps' && (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 sm:p-6 shadow-sm space-y-6">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700 pb-4">
             <div>
-              <h3 className="font-bold text-base text-slate-800 dark:text-white flex items-center gap-2">
+              <h3 className="font-extrabold text-base text-slate-800 dark:text-white flex items-center gap-2">
                 <Map className="w-5 h-5 text-cyan-600" />
                 <span>
                   {language === 'lo'
@@ -2964,152 +3438,198 @@ export const AdminTab: React.FC<AdminTabProps> = ({
             </div>
           </div>
 
-          {/* Single Dropdown Church Selection */}
-          <div className="p-4 sm:p-5 bg-gradient-to-r from-cyan-900/10 via-slate-900/5 to-slate-900/10 dark:from-cyan-950/40 dark:to-slate-900/60 rounded-2xl border border-cyan-200/80 dark:border-cyan-800/60 space-y-3">
-            <label className="block text-xs font-black uppercase tracking-wider text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5">
-              <Building className="w-4 h-4 text-[#cc0000]" />
-              <span>
-                {language === 'lo'
-                  ? 'ເລືອກຄຣິດສະຕະຈັກ / ບ້ານ ທີ່ຕ້ອງການໃສ່ແຜນທີ່ ແລະ ຮູບ:'
-                  : 'Select Target Church / Village:'}
-              </span>
-            </label>
-
-            <select
-              value={selectedMapVillageRowId || (villages[0]?.rowId ?? '')}
-              onChange={(e) => setSelectedMapVillageRowId(Number(e.target.value))}
-              className="w-full bg-white dark:bg-slate-900 border-2 border-cyan-500/80 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm cursor-pointer"
+          {/* Topic 1: Select & Edit Church Map / Photo */}
+          <div className="bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-xs">
+            <button
+              type="button"
+              onClick={() => toggleMapsSection('editor')}
+              className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-100 dark:hover:bg-slate-800/60 transition cursor-pointer"
             >
-              {villages.map((v) => (
-                <option key={v.rowId || v.id} value={v.rowId}>
-                  ⛪ {v.name} ({v.district}, {v.province}) • ຜູ້ເຊື່ອ {v.believers} ຄົນ {v.mapUrl ? ' [✓ ມີແຜນທີ່]' : ''}
-                </option>
-              ))}
-            </select>
+              <div className="flex items-center gap-2.5">
+                <Building className="w-4 h-4 text-[#cc0000] shrink-0" />
+                <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                  {language === 'lo'
+                    ? '1. ເລືອກຄຣິດສະຕະຈັກ ແລະ ແກ້ໄຂແຜນທີ່ / ຮູບພາບ (Select & Edit Church Map / Photo)'
+                    : '1. Select & Edit Church Map / Photo'}
+                </span>
+              </div>
+              <ChevronDown
+                className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+                  isMapsOpen('editor') ? 'rotate-0' : '-rotate-90'
+                }`}
+              />
+            </button>
+
+            {isMapsOpen('editor') && (
+              <div className="p-4 sm:p-5 pt-3 border-t border-slate-200 dark:border-slate-700 space-y-4">
+                <div className="p-4 sm:p-5 bg-gradient-to-r from-cyan-900/10 via-slate-900/5 to-slate-900/10 dark:from-cyan-950/40 dark:to-slate-900/60 rounded-2xl border border-cyan-200/80 dark:border-cyan-800/60 space-y-3">
+                  <label className="block text-xs font-black uppercase tracking-wider text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5">
+                    <Building className="w-4 h-4 text-[#cc0000]" />
+                    <span>
+                      {language === 'lo'
+                        ? 'ເລືອກຄຣິດສະຕະຈັກ / ບ້ານ ທີ່ຕ້ອງການໃສ່ແຜນທີ່ ແລະ ຮູບ:'
+                        : 'Select Target Church / Village:'}
+                    </span>
+                  </label>
+
+                  <select
+                    value={selectedMapVillageRowId || (villages[0]?.rowId ?? '')}
+                    onChange={(e) => setSelectedMapVillageRowId(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-slate-900 border-2 border-cyan-500/80 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm cursor-pointer"
+                  >
+                    {villages.map((v) => (
+                      <option key={v.rowId || v.id} value={v.rowId}>
+                        ⛪ {v.name} ({v.district}, {v.province}) • ຜູ້ເຊື່ອ {v.believers} ຄົນ {v.mapUrl ? ' [✓ ມີແຜນທີ່]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {(() => {
+                  const activeVillage =
+                    villages.find((v) => v.rowId === selectedMapVillageRowId) || villages[0];
+                  if (!activeVillage) {
+                    return (
+                      <div className="text-xs text-slate-400 p-4">
+                        {language === 'lo' ? 'ບໍ່ມີຂໍ້ມູນຄຣິດສະຕະຈັກ' : 'No church data available'}
+                      </div>
+                    );
+                  }
+                  return (
+                    <MapAndImageEditorCard
+                      key={activeVillage.rowId || activeVillage.id}
+                      village={activeVillage}
+                      onSave={onEditVillage}
+                      language={language}
+                    />
+                  );
+                })()}
+              </div>
+            )}
           </div>
 
-          {/* Editor Component for the Selected Church */}
-          {(() => {
-            const activeVillage =
-              villages.find((v) => v.rowId === selectedMapVillageRowId) || villages[0];
-            if (!activeVillage) {
-              return (
-                <div className="text-xs text-slate-400 p-4">
-                  {language === 'lo' ? 'ບໍ່ມີຂໍ້ມູນຄຣິດສະຕະຈັກ' : 'No church data available'}
-                </div>
-              );
-            }
-            return (
-              <MapAndImageEditorCard
-                key={activeVillage.rowId || activeVillage.id}
-                village={activeVillage}
-                onSave={onEditVillage}
-                language={language}
-              />
-            );
-          })()}
-
-          {/* Quick Overview Table of All Churches with Map Status */}
-          <div className="pt-4 border-t border-slate-100 dark:border-slate-700 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                <Building className="w-4 h-4 text-cyan-600" />
-                <span>
+          {/* Topic 2: Quick Overview Table of All Churches with Map Status */}
+          <div className="bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-xs">
+            <button
+              type="button"
+              onClick={() => toggleMapsSection('overview')}
+              className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-100 dark:hover:bg-slate-800/60 transition cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <Map className="w-4 h-4 text-cyan-600 shrink-0" />
+                <span className="font-extrabold text-sm text-slate-900 dark:text-white">
                   {language === 'lo'
-                    ? `ລາຍຊື່ຄຣິດສະຕະຈັກທັງໝົດ (${villages.length} ບ້ານ):`
-                    : `All Churches Overview (${villages.length}):`}
+                    ? `2. ຕາຕະລາງລາຍຊື່ຄຣິດສະຕະຈັກທັງໝົດ (${villages.length} ບ້ານ) (All Churches Overview)`
+                    : `2. All Churches Overview (${villages.length})`}
                 </span>
-              </h4>
-
-              <div className="relative w-48 sm:w-64">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
-                <input
-                  type="text"
-                  value={mapSearchQuery}
-                  onChange={(e) => setMapSearchQuery(e.target.value)}
-                  placeholder={language === 'lo' ? 'ຄົ້ນຫາຊື່ບ້ານ...' : 'Search...'}
-                  className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-white outline-none"
-                />
               </div>
-            </div>
+              <ChevronDown
+                className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+                  isMapsOpen('overview') ? 'rotate-0' : '-rotate-90'
+                }`}
+              />
+            </button>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 font-bold">
-                  <tr>
-                    <th className="px-3.5 py-2.5">ຮູບ</th>
-                    <th className="px-3.5 py-2.5">{language === 'lo' ? 'ຊື່ຄຣິດສະຕະຈັກ' : 'Church Name'}</th>
-                    <th className="px-3.5 py-2.5">{language === 'lo' ? 'ເມືອງ' : 'District'}</th>
-                    <th className="px-3.5 py-2.5">{language === 'lo' ? 'ສະຖານະ Google Maps' : 'Maps Link'}</th>
-                    <th className="px-3.5 py-2.5 text-right">{language === 'lo' ? 'ຈັດການ' : 'Action'}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {villages
-                    .filter((v) =>
-                      v.name.toLowerCase().includes(mapSearchQuery.toLowerCase()) ||
-                      v.district.toLowerCase().includes(mapSearchQuery.toLowerCase())
-                    )
-                    .map((v) => {
-                      const isSelected =
-                        selectedMapVillageRowId === v.rowId ||
-                        (!selectedMapVillageRowId && v.rowId === villages[0]?.rowId);
-                      return (
-                        <tr
-                          key={v.rowId || v.id}
-                          className={`hover:bg-cyan-50/50 dark:hover:bg-cyan-950/30 transition ${
-                            isSelected ? 'bg-cyan-50 dark:bg-cyan-950/60 font-bold' : ''
-                          }`}
-                        >
-                          <td className="px-3.5 py-2">
-                            <img
-                              src={v.imageUrl || 'https://images.unsplash.com/photo-1548625361-188683526017?q=80&w=200'}
-                              alt={v.name}
-                              className="w-9 h-7 rounded-md object-cover border border-slate-200 dark:border-slate-700"
-                            />
-                          </td>
-                          <td className="px-3.5 py-2 font-bold text-slate-800 dark:text-white">
-                            ⛪ {v.name}
-                          </td>
-                          <td className="px-3.5 py-2 text-slate-500 dark:text-slate-400">
-                            {v.district}
-                          </td>
-                          <td className="px-3.5 py-2">
-                            {v.mapUrl ? (
-                              <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                                ✓ {language === 'lo' ? 'ມີລິ້ງແຜນທີ່' : 'Linked'}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
-                                ⚠ {language === 'lo' ? 'ຍັງບໍ່ມີລິ້ງ' : 'No Link'}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3.5 py-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedMapVillageRowId(v.rowId)}
-                              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
-                                isSelected
-                                  ? 'bg-cyan-600 text-white'
-                                  : 'bg-slate-200 dark:bg-slate-700 hover:bg-cyan-600 hover:text-white text-slate-700 dark:text-slate-200'
+            {isMapsOpen('overview') && (
+              <div className="p-4 sm:p-5 pt-3 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500">
+                    {language === 'lo' ? 'ຄົ້ນຫາ ແລະ ເລືອກແກ້ໄຂ:' : 'Search and select to edit:'}
+                  </span>
+                  <div className="relative w-48 sm:w-64">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={mapSearchQuery}
+                      onChange={(e) => setMapSearchQuery(e.target.value)}
+                      placeholder={language === 'lo' ? 'ຄົ້ນຫາຊື່ບ້ານ...' : 'Search...'}
+                      className="w-full pl-8 pr-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-white outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 font-bold">
+                      <tr>
+                        <th className="px-3.5 py-2.5">ຮູບ</th>
+                        <th className="px-3.5 py-2.5">{language === 'lo' ? 'ຊື່ຄຣິດສະຕະຈັກ' : 'Church Name'}</th>
+                        <th className="px-3.5 py-2.5">{language === 'lo' ? 'ເມືອງ' : 'District'}</th>
+                        <th className="px-3.5 py-2.5">{language === 'lo' ? 'ສະຖານະ Google Maps' : 'Maps Link'}</th>
+                        <th className="px-3.5 py-2.5 text-right">{language === 'lo' ? 'ຈັດການ' : 'Action'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {villages
+                        .filter((v) =>
+                          v.name.toLowerCase().includes(mapSearchQuery.toLowerCase()) ||
+                          v.district.toLowerCase().includes(mapSearchQuery.toLowerCase())
+                        )
+                        .map((v) => {
+                          const isSelected =
+                            selectedMapVillageRowId === v.rowId ||
+                            (!selectedMapVillageRowId && v.rowId === villages[0]?.rowId);
+                          return (
+                            <tr
+                              key={v.rowId || v.id}
+                              className={`hover:bg-cyan-50/50 dark:hover:bg-cyan-950/30 transition ${
+                                isSelected ? 'bg-cyan-50 dark:bg-cyan-950/60 font-bold' : ''
                               }`}
                             >
-                              {isSelected
-                                ? language === 'lo'
-                                  ? 'ກຳລັງເລືອກຢູ່'
-                                  : 'Selected'
-                                : language === 'lo'
-                                ? 'ເລືອກແກ້ໄຂ'
-                                : 'Select Edit'}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
+                              <td className="px-3.5 py-2">
+                                <img
+                                  src={v.imageUrl || 'https://images.unsplash.com/photo-1548625361-188683526017?q=80&w=200'}
+                                  alt={v.name}
+                                  className="w-9 h-7 rounded-md object-cover border border-slate-200 dark:border-slate-700"
+                                />
+                              </td>
+                              <td className="px-3.5 py-2 font-bold text-slate-800 dark:text-white">
+                                ⛪ {v.name}
+                              </td>
+                              <td className="px-3.5 py-2 text-slate-500 dark:text-slate-400">
+                                {v.district}
+                              </td>
+                              <td className="px-3.5 py-2">
+                                {v.mapUrl ? (
+                                  <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                                    ✓ {language === 'lo' ? 'ມີລິ້ງແຜນທີ່' : 'Linked'}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                                    ⚠ {language === 'lo' ? 'ຍັງບໍ່ມີລິ້ງ' : 'No Link'}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3.5 py-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedMapVillageRowId(v.rowId);
+                                    setMapsOpenSections((prev) => ({ ...prev, editor: true }));
+                                  }}
+                                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-cyan-600 text-white'
+                                      : 'bg-slate-200 dark:bg-slate-700 hover:bg-cyan-600 hover:text-white text-slate-700 dark:text-slate-200'
+                                  }`}
+                                >
+                                  {isSelected
+                                    ? language === 'lo'
+                                      ? 'ກຳລັງເລືອກຢູ່'
+                                      : 'Selected'
+                                    : language === 'lo'
+                                    ? 'ເລືອກແກ້ໄຂ'
+                                    : 'Select Edit'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3158,6 +3678,20 @@ export const AdminTab: React.FC<AdminTabProps> = ({
           setBokeoTimelineTitleTh={setBokeoTimelineTitleTh}
           hideBokeoTimeline={hideBokeoTimeline}
           setHideBokeoTimeline={setHideBokeoTimeline}
+          vision={donationVision}
+          setVision={setDonationVision}
+          visionEn={donationVisionEn}
+          setVisionEn={setDonationVisionEn}
+          visionTh={donationVisionTh}
+          setVisionTh={setDonationVisionTh}
+          mission={donationMission}
+          setMission={setDonationMission}
+          missionEn={donationMissionEn}
+          setMissionEn={setDonationMissionEn}
+          missionTh={donationMissionTh}
+          setMissionTh={setDonationMissionTh}
+          hideVisionMission={hideVisionMissionState}
+          setHideVisionMission={setHideVisionMissionState}
           isSaving={isSavingPoster}
           onSave={handleSaveHomePosterForm}
         />
@@ -3180,137 +3714,62 @@ export const AdminTab: React.FC<AdminTabProps> = ({
             </span>
           </div>
 
-          <form onSubmit={handleSaveDonationForm} className="space-y-6">
-            {/* Protection Bar / Edit Mode Banner */}
-            <div
-              className={`p-3.5 sm:p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all ${
-                isEditingDonation
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
-                  : 'bg-slate-100 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <div
-                  className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-xs ${
-                    isEditingDonation ? 'bg-amber-500' : 'bg-slate-500'
-                  }`}
-                >
-                  {isEditingDonation ? <Unlock className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
-                </div>
-                <div>
-                  <h4 className="font-black text-xs sm:text-sm">
-                    {isEditingDonation
-                      ? language === 'lo'
-                        ? 'ກຳລັງຢູ່ໃນໂໝດແກ້ໄຂຂໍ້ມູນການບໍລິຈາກ'
-                        : 'Editing Mode Active (Donation & Prayer)'
-                      : language === 'lo'
-                      ? 'ໂໝດປ້ອງກັນການແກ້ໄຂ (ກົດປຸ່ມແກ້ໄຂເພື່ອປ່ຽນແປງຂໍ້ມູນ)'
-                      : 'Protected Mode (Click Edit to modify settings)'}
-                  </h4>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                {!isEditingDonation ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingDonation(true)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 transition cursor-pointer"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    <span>{language === 'lo' ? 'ກົດແກ້ໄຂຂໍ້ມູນ' : 'Edit Settings'}</span>
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleCancelEditDonation}
-                      className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      <span>{language === 'lo' ? 'ຍົກເລີກ' : 'Cancel'}</span>
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSavingDonation}
-                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
-                    >
-                      {isSavingDonation ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Save className="w-3.5 h-3.5" />
-                      )}
-                      <span>{language === 'lo' ? 'ບັນທຶກ' : 'Save'}</span>
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Section Visibility Controls for Donation Section */}
-            <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-              <div>
-                <h4 className="font-extrabold text-xs uppercase tracking-wider text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-emerald-600" />
-                  <span>{language === 'lo' ? 'ການສະແດງຜົນສ່ວນບໍລິຈາກ (Donation Visibility)' : 'Donation Visibility'}</span>
-                </h4>
-              </div>
+          <form onSubmit={handleSaveDonationForm} className="space-y-3.5">
+            {/* Topic 1: Bank Accounts */}
+            <div className="bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-xs">
               <button
                 type="button"
-                disabled={!isEditingDonation}
-                onClick={() => setHideDonationSectionState(!hideDonationSectionState)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
-                  !isEditingDonation ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                } ${
-                  hideDonationSectionState
-                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300'
-                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300'
-                }`}
+                onClick={() => toggleDonationSection('banks')}
+                className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-100 dark:hover:bg-slate-800/60 transition cursor-pointer"
               >
-                {hideDonationSectionState ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                <span>{hideDonationSectionState ? (language === 'lo' ? '🙈 ເຊື່ອງສ່ວນບໍລິຈາກ' : 'Donation Hidden') : (language === 'lo' ? '👁️ ສະແດ່ງສ່ວນບໍລິຈາກ' : 'Donation Visible')}</span>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-2">
-                <h4 className="font-extrabold text-sm text-slate-800 dark:text-white flex items-center gap-2">
-                  <CreditCard className="w-4 h-4 text-emerald-600" />
-                  <span>
+                <div className="flex items-center gap-2.5">
+                  <CreditCard className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
                     {language === 'lo'
-                      ? 'ລາຍການບັນຊີທະນາຄານບໍລິຈາກ (Multiple Bank Accounts)'
-                      : 'Bank Accounts for Donation'}
-                  </span>
-                </h4>
-                <button
-                  type="button"
-                  disabled={!isEditingDonation}
-                  onClick={() => {
-                    const newAcc: BankAccount = {
-                      id: String(Date.now()),
-                      bankName: 'ທະນາຄານ ໃໝ່ (New Bank)',
-                      bankNameEn: 'New Bank',
-                      accountName: 'HOPE BOKEO MINISTRY PROJECT',
-                      accountNumber: '000-00-00-000000000-000',
-                      swiftCode: '',
-                      qrImageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600',
-                      hidden: false,
-                    };
-                    setDonationBankAccounts([...donationBankAccounts, newAcc]);
-                  }}
-                  className={`px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow-xs ${
-                    !isEditingDonation ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                      ? '1. ລາຍການບັນຊີທະນາຄານບໍລິຈາກ (Multiple Bank Accounts)'
+                      : '1. Bank Accounts for Donation'}
+                  </h4>
+                </div>
+                <ChevronDown
+                  className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+                    isDonationOpen('banks') ? 'rotate-0' : '-rotate-90'
                   }`}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>{language === 'lo' ? 'ເພີ່ມບັນຊີທະນາຄານ' : 'Add Bank Account'}</span>
-                </button>
-              </div>
+                />
+              </button>
 
+              {isDonationOpen('banks') && (
+                <div className="p-5 pt-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
+                  <div className="flex items-center justify-between gap-3 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/60 rounded-xl px-3.5 py-2.5">
+                    <span className="text-xs font-bold text-emerald-800 dark:text-emerald-200">
+                      {language === 'lo'
+                        ? '💡 ຈັດການ ຫຼື ເພີ່ມບັນຊີທະນາຄານສຳລັບຮັບບໍລິຈາກ:'
+                        : '💡 Manage or add bank accounts for donations:'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newAcc: BankAccount = {
+                          id: String(Date.now()),
+                          bankName: 'ທະນາຄານ ໃໝ່ (New Bank)',
+                          bankNameEn: 'New Bank',
+                          accountName: 'HOPE BOKEO MINISTRY PROJECT',
+                          accountNumber: '000-00-00-000000000-000',
+                          swiftCode: '',
+                          qrImageUrl: '',
+                          hidden: false,
+                        };
+                        setDonationBankAccounts([...donationBankAccounts, newAcc]);
+                      }}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{language === 'lo' ? 'ເພີ່ມບັນຊີທະນາຄານ' : 'Add Bank Account'}</span>
+                    </button>
+                  </div>
               {donationBankAccounts.map((acc, index) => (
                 <div
                   key={acc.id || index}
-                  className="p-4 bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-4 relative"
+                  className="p-4 bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-4 relative"
                 >
                   <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
                     <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">
@@ -3319,15 +3778,12 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        disabled={!isEditingDonation}
                         onClick={() => {
                           const updated = [...donationBankAccounts];
                           updated[index].hidden = !updated[index].hidden;
                           setDonationBankAccounts(updated);
                         }}
-                        className={`px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
-                          !isEditingDonation ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                        } ${
+                        className={`px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
                           acc.hidden
                             ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300'
                             : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300'
@@ -3344,14 +3800,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       {donationBankAccounts.length > 1 && (
                         <button
                           type="button"
-                          disabled={!isEditingDonation}
                           onClick={() => {
                             const updated = donationBankAccounts.filter((_, i) => i !== index);
                             setDonationBankAccounts(updated);
                           }}
-                          className={`p-1 text-red-500 hover:text-red-700 text-xs font-bold flex items-center gap-1 ${
-                            !isEditingDonation ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          }`}
+                          className="p-1 text-red-500 hover:text-red-700 text-xs font-bold flex items-center gap-1 cursor-pointer"
                           title={language === 'lo' ? 'ລົບບັນຊີນີ້' : 'Delete account'}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -3369,14 +3822,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       <input
                         type="text"
                         required
-                        disabled={!isEditingDonation}
                         value={acc.bankName}
                         onChange={(e) => {
                           const updated = [...donationBankAccounts];
                           updated[index].bankName = e.target.value;
                           setDonationBankAccounts(updated);
                         }}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                     </div>
 
@@ -3386,7 +3838,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       </label>
                       <input
                         type="text"
-                        disabled={!isEditingDonation}
                         value={acc.bankNameEn || ''}
                         onChange={(e) => {
                           const updated = [...donationBankAccounts];
@@ -3394,7 +3845,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           setDonationBankAccounts(updated);
                         }}
                         placeholder="Banque Pour Le Commerce..."
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                     </div>
 
@@ -3404,7 +3855,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       </label>
                       <input
                         type="text"
-                        disabled={!isEditingDonation}
                         value={acc.bankNameTh || ''}
                         onChange={(e) => {
                           const updated = [...donationBankAccounts];
@@ -3412,7 +3862,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           setDonationBankAccounts(updated);
                         }}
                         placeholder="ธนาคาร..."
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                     </div>
 
@@ -3423,14 +3873,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       <input
                         type="text"
                         required
-                        disabled={!isEditingDonation}
                         value={acc.accountName}
                         onChange={(e) => {
                           const updated = [...donationBankAccounts];
                           updated[index].accountName = e.target.value;
                           setDonationBankAccounts(updated);
                         }}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                     </div>
 
@@ -3441,14 +3890,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       <input
                         type="text"
                         required
-                        disabled={!isEditingDonation}
                         value={acc.accountNumber}
                         onChange={(e) => {
                           const updated = [...donationBankAccounts];
                           updated[index].accountNumber = e.target.value;
                           setDonationBankAccounts(updated);
                         }}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                     </div>
 
@@ -3458,7 +3906,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       </label>
                       <input
                         type="text"
-                        disabled={!isEditingDonation}
                         value={acc.swiftCode || ''}
                         onChange={(e) => {
                           const updated = [...donationBankAccounts];
@@ -3466,7 +3913,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           setDonationBankAccounts(updated);
                         }}
                         placeholder="BCELLA2X"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                     </div>
 
@@ -3476,7 +3923,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                       </label>
                       <input
                         type="text"
-                        disabled={!isEditingDonation}
                         value={acc.donationLink || ''}
                         onChange={(e) => {
                           const updated = [...donationBankAccounts];
@@ -3484,7 +3930,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           setDonationBankAccounts(updated);
                         }}
                         placeholder="https://bcel.com.la/pay/... ຫຼື ລິ້ງການໂອນເງິນ"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       <p className="text-[10px] text-slate-500 mt-1">
                         {language === 'lo'
@@ -3520,8 +3966,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                           size={140}
                           language={language}
                           onGenerated={(dataUrl) => {
-                            if (!isEditingDonation) return;
-                            // If current qrImageUrl is empty or uses a placeholder, auto-set dataUrl
                             if (!acc.qrImageUrl || acc.qrImageUrl.includes('unsplash.com')) {
                               const updated = [...donationBankAccounts];
                               updated[index].qrImageUrl = dataUrl;
@@ -3531,9 +3975,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                         />
                         <button
                           type="button"
-                          disabled={!isEditingDonation}
                           onClick={() => {
-                            // Force sync generated QR code to account qrImageUrl
                             const payload = acc.donationLink || acc.qrPayload || `DONATION|BANK:${acc.bankName}|ACC:${acc.accountNumber}|NAME:${acc.accountName}`;
                             import('../utils/qrCode').then(({ generateQRCodeDataUrl }) => {
                               generateQRCodeDataUrl(payload, { width: 400 }).then((url) => {
@@ -3543,9 +3985,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                               });
                             });
                           }}
-                          className={`mt-2 w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] rounded-lg shadow-xs transition flex items-center justify-center gap-1 ${
-                            !isEditingDonation ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          }`}
+                          className="mt-2 w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] rounded-lg shadow-xs transition flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
                           <span>
@@ -3561,7 +4001,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                         </label>
                         <UnifiedMediaUploader
                           value={acc.qrImageUrl}
-                          disabled={!isEditingDonation}
                           onChange={(url) => {
                             const updated = [...donationBankAccounts];
                             updated[index].qrImageUrl = url;
@@ -3575,295 +4014,290 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                   </div>
                 </div>
               ))}
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {language === 'lo' ? 'ເບີໂທສາຍດ່ວນອະທິຖານ (Phone):' : 'Prayer Phone Line:'}
-                </label>
-                <input
-                  type="text"
-                  disabled={!isEditingDonation}
-                  value={donationPhone}
-                  onChange={(e) => setDonationPhone(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {language === 'lo' ? 'WhatsApp ຮ່ວມອະທິຖານ:' : 'WhatsApp Support:'}
-                </label>
-                <input
-                  type="text"
-                  disabled={!isEditingDonation}
-                  value={donationWhatsapp}
-                  onChange={(e) => setDonationWhatsapp(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {language === 'lo' ? 'ອີເມວພັນທະກິດ (Email):' : 'Ministry Email:'}
-                </label>
-                <input
-                  type="email"
-                  disabled={!isEditingDonation}
-                  value={donationEmail}
-                  onChange={(e) => setDonationEmail(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
-                />
-              </div>
-            </div>
-
-            {/* Vision & Mission Settings (Multilingual) */}
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-4">
-              <h4 className="font-bold text-xs text-slate-800 dark:text-white uppercase tracking-wider border-l-4 border-[#cc0000] pl-2.5">
-                {language === 'lo' ? '🎯 ວິໄສທັດ ແລະ ພັນທະກິດ (Vision & Mission)' : '🎯 Vision & Mission Settings'}
-              </h4>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    {language === 'lo' ? '1. ວິໄສທັດ (Vision) *' : '1. Vision Statement *'}
-                  </span>
-                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                    {(['la', 'tha', 'en'] as const).map((l) => (
-                      <button
-                        key={l}
-                        type="button"
-                        onClick={() => setDonationVisionLang(l)}
-                        className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
-                          donationVisionLang === l
-                            ? 'bg-[#cc0000] text-white shadow-xs'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                        }`}
-                      >
-                        {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
-                      </button>
-                    ))}
+                  {/* Bottom Save Bar for Topic 1 (Banks) */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end">
+                    <button
+                      type="submit"
+                      disabled={isSavingDonation}
+                      className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isSavingDonation ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4" />
+                      )}
+                      <span>
+                        {isSavingDonation
+                          ? language === 'lo'
+                            ? 'ກຳລັງບັນທຶກ...'
+                            : 'Saving...'
+                          : language === 'lo'
+                          ? 'ບັນທຶກການຕັ້ງຄ່າ'
+                          : 'Save Settings'}
+                      </span>
+                    </button>
                   </div>
                 </div>
-                <textarea
-                  rows={3}
-                  disabled={!isEditingDonation}
-                  value={
-                    donationVisionLang === 'la'
-                      ? donationVision
-                      : donationVisionLang === 'tha'
-                      ? donationVisionTh
-                      : donationVisionEn
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (donationVisionLang === 'la') setDonationVision(val);
-                    else if (donationVisionLang === 'tha') setDonationVisionTh(val);
-                    else setDonationVisionEn(val);
-                  }}
-                  placeholder={
-                    donationVisionLang === 'la'
-                      ? 'ສ້າງສາວົກ ແລະ ຂະຫຍາຍແຜ່ນດິນຂອງພຣະເຈົ້າ...'
-                      : donationVisionLang === 'tha'
-                      ? 'สร้างสาวกและขยายแผ่นดินของพระเจ้า...'
-                      : 'Disciple nations and expand the Kingdom of God...'
-                  }
-                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
+              )}
+            </div>
+
+            {/* Topic 2: Prayer Partnership & Hotline */}
+            <div className="bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-xs">
+              <button
+                type="button"
+                onClick={() => toggleDonationSection('hotline')}
+                className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-100 dark:hover:bg-slate-800/60 transition cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Eye className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                    {language === 'lo'
+                      ? '2. ຊ່ອງທາງຮ່ວມອະທິຖານ & ສາຍດ່ວນ (Prayer Partnership & Hotline)'
+                      : '2. Prayer Partnership & Hotline'}
+                  </h4>
+                </div>
+                <ChevronDown
+                  className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+                    isDonationOpen('hotline') ? 'rotate-0' : '-rotate-90'
+                  }`}
                 />
-              </div>
+              </button>
 
-              <div className="space-y-2 pt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    {language === 'lo' ? '2. ພັນທະກິດ (Mission - 1 ຂໍ້ຕໍ່ 1 ແຖວ) *' : '2. Mission Items (1 item per line) *'}
-                  </span>
-                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                    {(['la', 'tha', 'en'] as const).map((l) => (
-                      <button
-                        key={l}
-                        type="button"
-                        onClick={() => setDonationMissionLang(l)}
-                        className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
-                          donationMissionLang === l
-                            ? 'bg-[#cc0000] text-white shadow-xs'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                        }`}
-                      >
-                        {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <textarea
-                  rows={4}
-                  disabled={!isEditingDonation}
-                  value={
-                    donationMissionLang === 'la'
-                      ? donationMission
-                      : donationMissionLang === 'tha'
-                      ? donationMissionTh
-                      : donationMissionEn
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (donationMissionLang === 'la') setDonationMission(val);
-                    else if (donationMissionLang === 'tha') setDonationMissionTh(val);
-                    else setDonationMissionEn(val);
-                  }}
-                  placeholder={
-                    donationMissionLang === 'la'
-                      ? 'ປະກາດຂ່າວປະເສີດ...\nຝຶກອົບຮົມຜູ້ນຳ...'
-                      : donationMissionLang === 'tha'
-                      ? 'ประกาศข่าวประเสริฐ...\nฝึกอบรมผู้นำ...'
-                      : 'Proclaim the Gospel...\nTrain local leaders...'
-                  }
-                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {language === 'lo'
-                    ? 'ຂໍ້ຄວາມບັນຍາຍການບໍລິຈາກ (Purpose Description):'
-                    : 'Donation Purpose Description:'}
-                </label>
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                  {(['la', 'tha', 'en'] as const).map((l) => (
-                    <button
-                      key={l}
-                      type="button"
-                      onClick={() => setDonationPurposeLang(l)}
-                      className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
-                        donationPurposeLang === l
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <textarea
-                rows={3}
-                disabled={!isEditingDonation}
-                value={
-                  donationPurposeLang === 'la'
-                    ? donationPurposeDesc
-                    : donationPurposeLang === 'tha'
-                    ? donationPurposeDescTh
-                    : donationPurposeDescEn
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (donationPurposeLang === 'la') setDonationPurposeDesc(val);
-                  else if (donationPurposeLang === 'tha') setDonationPurposeDescTh(val);
-                  else setDonationPurposeDescEn(val);
-                }}
-                placeholder={
-                  donationPurposeLang === 'la'
-                    ? 'ເງິນບໍລິຈາກທັງໝົດຈະຖືກນຳໃຊ້ເຂົ້າໃນ...'
-                    : donationPurposeLang === 'tha'
-                    ? 'เงินบริจาคทั้งหมดจะถูกนำไปใช้ใน...'
-                    : 'All donations directly fund field ministry operations...'
-                }
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950 mb-4"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {language === 'lo' ? 'ຂໍ້ຄວາມອຸປະຖຳ & ຂອບໃຈ (Support Note):' : 'Support Note:'}
-                </label>
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                  {(['la', 'tha', 'en'] as const).map((l) => (
-                    <button
-                      key={l}
-                      type="button"
-                      onClick={() => setDonationSupportNoteLang(l)}
-                      className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
-                        donationSupportNoteLang === l
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <textarea
-                rows={2}
-                disabled={!isEditingDonation}
-                value={
-                  donationSupportNoteLang === 'la'
-                    ? donationSupportNote
-                    : donationSupportNoteLang === 'tha'
-                    ? donationSupportNoteTh
-                    : donationSupportNoteEn
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (donationSupportNoteLang === 'la') setDonationSupportNote(val);
-                  else if (donationSupportNoteLang === 'tha') setDonationSupportNoteTh(val);
-                  else setDonationSupportNoteEn(val);
-                }}
-                placeholder={
-                  donationSupportNoteLang === 'la'
-                    ? 'ທຸກໆການຮ່ວມບໍລິຈາກ ແລະ ຄຳອະທິຖານຂອງທ່ານ ແມ່ນມີຄຸນຄ່າຢ່າງຍິ່ງ...'
-                    : donationSupportNoteLang === 'tha'
-                    ? 'ทุกๆ การร่วมบริจาคและคำอธิษฐานของคุณมีคุณค่าอย่างยิ่ง...'
-                    : 'Your donations and faithful prayers are deeply appreciated...'
-                }
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-950"
-              />
-            </div>
-
-            <div className="pt-4 flex items-center justify-end gap-3">
-              {!isEditingDonation ? (
-                <button
-                  type="button"
-                  onClick={() => setIsEditingDonation(true)}
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition cursor-pointer"
-                >
-                  <Edit3 className="w-4 h-4" />
-                  <span>{language === 'lo' ? 'ກົດແກ້ໄຂຂໍ້ມູນການບໍລິຈາກ' : 'Edit Donation Settings'}</span>
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleCancelEditDonation}
-                    className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                    <span>{language === 'lo' ? 'ຍົກເລີກ' : 'Cancel'}</span>
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingDonation}
-                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition disabled:opacity-50 cursor-pointer"
-                  >
-                    {isSavingDonation ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Save className="w-4 h-4" />
-                    )}
-                    <span>
-                      {isSavingDonation
-                        ? language === 'lo'
-                          ? 'ກຳລັງບັນທຶກ...'
-                          : 'Saving...'
-                        : language === 'lo'
-                        ? 'ບັນທຶກຂໍ້ມູນການບໍລິຈາກ'
-                        : 'Save Donation Settings'}
+              {isDonationOpen('hotline') && (
+                <div className="p-5 pt-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
+                  <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      {language === 'lo' ? 'ສະຖານະການສະແດງສາຍດ່ວນ (Visibility):' : 'Hotline Visibility:'}
                     </span>
-                  </button>
-                </>
+                    <button
+                      type="button"
+                      onClick={() => setHidePrayerLineState(!hidePrayerLineState)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                        hidePrayerLineState
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300'
+                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300'
+                      }`}
+                    >
+                      {hidePrayerLineState ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      <span>
+                        {hidePrayerLineState
+                          ? (language === 'lo' ? '🙈 ເຊື່ອງ' : 'Hidden')
+                          : (language === 'lo' ? '👁️ ສະແດງ' : 'Visible')}
+                      </span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {language === 'lo' ? 'ເບີໂທສາຍດ່ວນອະທິຖານ (Phone):' : 'Prayer Phone Line:'}
+                    </label>
+                    <input
+                      type="text"
+                      value={donationPhone}
+                      onChange={(e) => setDonationPhone(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {language === 'lo' ? 'WhatsApp ຮ່ວມອະທິຖານ:' : 'WhatsApp Support:'}
+                    </label>
+                    <input
+                      type="text"
+                      value={donationWhatsapp}
+                      onChange={(e) => setDonationWhatsapp(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {language === 'lo' ? 'ອີເມວພັນທະກິດ (Email):' : 'Ministry Email:'}
+                    </label>
+                    <input
+                      type="email"
+                      value={donationEmail}
+                      onChange={(e) => setDonationEmail(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                  </div>
+                  </div>
+
+                  {/* Bottom Save Bar for Topic 2 (Hotline) */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end">
+                    <button
+                      type="submit"
+                      disabled={isSavingDonation}
+                      className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isSavingDonation ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4" />
+                      )}
+                      <span>
+                        {isSavingDonation
+                          ? language === 'lo'
+                            ? 'ກຳລັງບັນທຶກ...'
+                            : 'Saving...'
+                          : language === 'lo'
+                          ? 'ບັນທຶກການຕັ້ງຄ່າ'
+                          : 'Save Settings'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Topic 3: Purpose Description & Support Note */}
+            <div className="bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-xs">
+              <button
+                type="button"
+                onClick={() => toggleDonationSection('notes')}
+                className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-100 dark:hover:bg-slate-800/60 transition cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                    {language === 'lo'
+                      ? '3. ຂໍ້ຄວາມບັນຍາຍການບໍລິຈາກ & ຂອບໃຈ (Donation Purpose & Support Note)'
+                      : '3. Donation Purpose & Support Note'}
+                  </h4>
+                </div>
+                <ChevronDown
+                  className={`w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0 ${
+                    isDonationOpen('notes') ? 'rotate-0' : '-rotate-90'
+                  }`}
+                />
+              </button>
+
+              {isDonationOpen('notes') && (
+                <div className="p-5 pt-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {language === 'lo'
+                          ? 'ຂໍ້ຄວາມບັນຍາຍການບໍລິຈາກ (Purpose Description):'
+                          : 'Donation Purpose Description:'}
+                      </label>
+                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                        {(['la', 'tha', 'en'] as const).map((l) => (
+                          <button
+                            key={l}
+                            type="button"
+                            onClick={() => setDonationPurposeLang(l)}
+                            className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
+                              donationPurposeLang === l
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                          >
+                            {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <textarea
+                      rows={3}
+                      value={
+                        donationPurposeLang === 'la'
+                          ? donationPurposeDesc
+                          : donationPurposeLang === 'tha'
+                          ? donationPurposeDescTh
+                          : donationPurposeDescEn
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (donationPurposeLang === 'la') setDonationPurposeDesc(val);
+                        else if (donationPurposeLang === 'tha') setDonationPurposeDescTh(val);
+                        else setDonationPurposeDescEn(val);
+                      }}
+                      placeholder={
+                        donationPurposeLang === 'la'
+                          ? 'ເງິນບໍລິຈາກທັງໝົດຈະຖືກນຳໃຊ້ເຂົ້າໃນ...'
+                          : donationPurposeLang === 'tha'
+                          ? 'เงินบริจาคทั้งหมดจะถูกนำไปใช้ใน...'
+                          : 'All donations directly fund field ministry operations...'
+                      }
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {language === 'lo' ? 'ຂໍ້ຄວາມອຸປະຖຳ & ຂອບໃຈ (Support Note):' : 'Support Note:'}
+                      </label>
+                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                        {(['la', 'tha', 'en'] as const).map((l) => (
+                          <button
+                            key={l}
+                            type="button"
+                            onClick={() => setDonationSupportNoteLang(l)}
+                            className={`px-2.5 py-0.5 rounded-md text-[10.5px] font-black transition cursor-pointer ${
+                              donationSupportNoteLang === l
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                          >
+                            {l === 'la' ? 'La' : l === 'tha' ? 'Tha' : 'En'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={
+                        donationSupportNoteLang === 'la'
+                          ? donationSupportNote
+                          : donationSupportNoteLang === 'tha'
+                          ? donationSupportNoteTh
+                          : donationSupportNoteEn
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (donationSupportNoteLang === 'la') setDonationSupportNote(val);
+                        else if (donationSupportNoteLang === 'tha') setDonationSupportNoteTh(val);
+                        else setDonationSupportNoteEn(val);
+                      }}
+                      placeholder={
+                        donationSupportNoteLang === 'la'
+                          ? 'ທຸກໆການຮ່ວມບໍລິຈາກ ແລະ ຄຳອະທິຖານຂອງທ່ານ ແມ່ນມີຄຸນຄ່າຢ່າງຍິ່ງ...'
+                          : donationSupportNoteLang === 'tha'
+                          ? 'ทุกๆ การร่วมบริจาคและคำอธิษฐานของคุณมีคุณค่าอย่างยิ่ง...'
+                          : 'Your donations and faithful prayers are deeply appreciated...'
+                      }
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-medium text-slate-800 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                  </div>
+
+                  {/* Bottom Save Bar for Topic 3 (Notes) */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end">
+                    <button
+                      type="submit"
+                      disabled={isSavingDonation}
+                      className="px-5 py-2 bg-[#cc0000] hover:bg-red-700 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isSavingDonation ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4" />
+                      )}
+                      <span>
+                        {isSavingDonation
+                          ? language === 'lo'
+                            ? 'ກຳລັງບັນທຶກ...'
+                            : 'Saving...'
+                          : language === 'lo'
+                          ? 'ບັນທຶກການຕັ້ງຄ່າ'
+                          : 'Save Settings'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </form>
