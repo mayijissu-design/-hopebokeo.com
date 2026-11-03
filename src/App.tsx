@@ -303,10 +303,21 @@ export default function App() {
   // Data State with Instant Multi-Layer Local Storage Cache & Baseline Hydration
   const [villages, setVillages] = useState<Village[]>(() => {
     try {
-      const cached = localStorage.getItem('hb_cached_villages');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const restoredVersion = localStorage.getItem('hb_ledger_restored_v3');
+      if (restoredVersion === 'true') {
+        const cached = localStorage.getItem('hb_cached_villages');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } else {
+        localStorage.setItem('hb_ledger_restored_v3', 'true');
+        localStorage.setItem('hb_cached_villages', JSON.stringify(initialDefaultData?.villages || []));
+        localStorage.setItem('hb_cached_events', JSON.stringify(initialDefaultData?.events || []));
+        localStorage.setItem('hb_cached_teams', JSON.stringify(initialDefaultData?.teams || []));
+        if (initialDefaultData?.homePoster) {
+          localStorage.setItem('hb_cached_home_poster', JSON.stringify(initialDefaultData.homePoster));
+        }
       }
     } catch {}
     return (initialDefaultData?.villages as Village[]) || [];
@@ -335,7 +346,8 @@ export default function App() {
     try {
       const cached = localStorage.getItem('hb_cached_home_poster');
       if (cached) {
-        return JSON.parse(cached);
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.title) return parsed;
       }
     } catch {}
     return (initialDefaultData?.homePoster as HomePoster) || undefined;
@@ -462,22 +474,34 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          const cleanVillages = (data.villages || []).map((v: any) => ({
-            ...v,
-            heard: Number(v.heard) || 0,
-            believers: Number(v.believers) || 0,
-            baptized: Number(v.baptized) || 0,
-            attending: typeof v.attending === 'number' ? v.attending : (Number(v.attending) || 0),
-            leaders: typeof v.leaders === 'number' ? v.leaders : (Number(v.leaders) || 0),
-          }));
-          setVillages(cleanVillages);
-          setEvents(data.events || []);
-          setTeams(data.teams || []);
-          try {
-            localStorage.setItem('hb_cached_villages', JSON.stringify(cleanVillages));
-            safeCacheEvents(data.events || []);
-            localStorage.setItem('hb_cached_teams', JSON.stringify(data.teams || []));
-          } catch {}
+          if (Array.isArray(data.villages) && data.villages.length > 0) {
+            const cleanVillages = data.villages.map((v: any) => ({
+              ...v,
+              heard: Number(v.heard) || 0,
+              believers: Number(v.believers) || 0,
+              baptized: Number(v.baptized) || 0,
+              attending: typeof v.attending === 'number' ? v.attending : (Number(v.attending) || 0),
+              leaders: typeof v.leaders === 'number' ? Math.max(0, v.leaders) : Math.max(0, Number(v.leaders) || 0),
+            }));
+            setVillages(cleanVillages);
+            try {
+              localStorage.setItem('hb_cached_villages', JSON.stringify(cleanVillages));
+            } catch {}
+          }
+
+          if (Array.isArray(data.events) && data.events.length > 0) {
+            setEvents(data.events);
+            try {
+              safeCacheEvents(data.events);
+            } catch {}
+          }
+
+          if (Array.isArray(data.teams) && data.teams.length > 0) {
+            setTeams(data.teams);
+            try {
+              localStorage.setItem('hb_cached_teams', JSON.stringify(data.teams));
+            } catch {}
+          }
 
           if (data.homePoster) {
             setHomePoster(data.homePoster);
@@ -512,16 +536,21 @@ export default function App() {
   const handleSaveHomePoster = async (poster: HomePoster) => {
     try {
       setIsSyncing(true);
-      await saveHomePosterToFirestore(poster);
       setHomePoster(poster);
       try { localStorage.setItem('hb_cached_home_poster', JSON.stringify(poster)); } catch {}
       triggerSyncIndicator();
 
-      fetch('/api/save-home-poster', {
+      const apiPromise = fetch('/api/save-home-poster', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ homePoster: poster }),
       }).catch(() => {});
+
+      const fsPromise = saveHomePosterToFirestore(poster).catch((e) =>
+        console.warn('Client firestore saveHomePoster notice:', e)
+      );
+
+      await Promise.allSettled([apiPromise, fsPromise]);
     } catch (err) {
       setIsSyncing(false);
       console.error('Save poster error:', err);
@@ -532,16 +561,21 @@ export default function App() {
   const handleSaveDonationInfo = async (info: DonationInfo) => {
     try {
       setIsSyncing(true);
-      await saveDonationInfoToFirestore(info);
       setDonationInfo(info);
       try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(info)); } catch {}
       triggerSyncIndicator();
 
-      fetch('/api/save-donation-info', {
+      const apiPromise = fetch('/api/save-donation-info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(info),
       }).catch(() => {});
+
+      const fsPromise = saveDonationInfoToFirestore(info).catch((e) =>
+        console.warn('Client firestore saveDonationInfo notice:', e)
+      );
+
+      await Promise.allSettled([apiPromise, fsPromise]);
     } catch (err) {
       setIsSyncing(false);
       console.error('Save donation info error:', err);
@@ -844,13 +878,17 @@ export default function App() {
   const handleSaveEventRecord = async (updatedEvent: EventData) => {
     try {
       setIsSyncing(true);
-      await saveEventToFirestore(updatedEvent);
       setEvents((prev) => {
-        const next = prev.map((e) =>
-          e.rowId === updatedEvent.rowId || (updatedEvent.id && e.id === updatedEvent.id)
-            ? { ...e, ...updatedEvent }
-            : e
+        const exists = prev.some(
+          (e) => e.rowId === updatedEvent.rowId || (updatedEvent.id && e.id === updatedEvent.id)
         );
+        const next = exists
+          ? prev.map((e) =>
+              e.rowId === updatedEvent.rowId || (updatedEvent.id && e.id === updatedEvent.id)
+                ? { ...e, ...updatedEvent }
+                : e
+            )
+          : [updatedEvent, ...prev];
         try {
           localStorage.setItem('hb_cached_events', JSON.stringify(next));
         } catch {}
@@ -858,11 +896,17 @@ export default function App() {
       });
       triggerSyncIndicator();
 
-      fetch('/api/save-event', {
+      const apiPromise = fetch('/api/save-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedEvent),
       }).catch(() => {});
+
+      const fsPromise = saveEventToFirestore(updatedEvent).catch((e) =>
+        console.warn('Client firestore saveEvent notice:', e)
+      );
+
+      await Promise.allSettled([apiPromise, fsPromise]);
     } catch (err) {
       setIsSyncing(false);
       console.error('Failed to save event update:', err);
@@ -873,7 +917,12 @@ export default function App() {
   const handleSaveTeamRecord = async (updatedTeam: TeamMember) => {
     try {
       setIsSyncing(true);
-      const saved = await saveTeamToFirestore(updatedTeam);
+      let saved = updatedTeam;
+      try {
+        saved = await saveTeamToFirestore(updatedTeam);
+      } catch (e) {
+        console.warn('Client firestore saveTeam notice:', e);
+      }
       setTeams((prev) => {
         const targetId = updatedTeam.id;
         const targetRowId = updatedTeam.rowId;
@@ -886,16 +935,19 @@ export default function App() {
             (targetName && t.name?.trim().toLowerCase() === targetName)
         );
 
-        if (exists) {
-          return prev.map((t) =>
-            (targetId && t.id === targetId) ||
-            (targetRowId && t.rowId === targetRowId) ||
-            (targetName && t.name?.trim().toLowerCase() === targetName)
-              ? { ...t, ...saved, hidden: Boolean(updatedTeam.hidden) }
-              : t
-          );
-        }
-        return [...prev, saved];
+        const next = exists
+          ? prev.map((t) =>
+              (targetId && t.id === targetId) ||
+              (targetRowId && t.rowId === targetRowId) ||
+              (targetName && t.name?.trim().toLowerCase() === targetName)
+                ? { ...t, ...saved, hidden: Boolean(updatedTeam.hidden) }
+                : t
+            )
+          : [...prev, saved];
+        try {
+          localStorage.setItem('hb_cached_teams', JSON.stringify(next));
+        } catch {}
+        return next;
       });
       triggerSyncIndicator();
 

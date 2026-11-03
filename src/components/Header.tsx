@@ -87,7 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
   ];
 
   return (
-    <header className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md sticky top-0 z-40 transition-colors w-full">
+    <header className="bg-white/70 dark:bg-slate-900/75 backdrop-blur-md border-b border-white/30 dark:border-slate-800/60 sticky top-0 z-40 transition-colors w-full">
       <div className="w-full pl-3 sm:pl-6 lg:pl-8 pr-3 sm:pr-6 lg:pr-8 h-16 sm:h-18 flex items-center justify-between gap-3">
         {/* Logo & Title matching exact mockup design */}
         <div className="flex items-center gap-2.5 cursor-pointer shrink-0 select-none group" onClick={() => setActiveTab('home')}>
@@ -109,33 +109,35 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs (Visible on tablet, desktop and preview pane) */}
-        <nav className="hidden sm:flex items-center gap-1 md:gap-1.5 xl:gap-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id || (item.id === 'home' && activeTab === 'home');
-            return (
-              <button
-                key={item.id}
-                onClick={item.action}
-                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer rounded-lg relative ${
-                  isActive
-                    ? 'text-[#cc0000] dark:text-red-400 font-extrabold'
-                    : 'text-slate-700 dark:text-slate-200 hover:text-[#cc0000] dark:hover:text-red-400 font-semibold'
-                }`}
-              >
-                <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isActive ? 'text-[#cc0000] dark:text-red-400' : (item.iconColor || 'text-slate-500 dark:text-slate-400')}`} />
-                <span>{item.label}</span>
-                {isActive && (
-                  <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#cc0000] rounded-full" />
-                )}
-              </button>
-            );
-          })}
-        </nav>
+        {/* Right-aligned Navigation Tabs + Controls */}
+        <div className="flex items-center justify-end gap-2 sm:gap-4 lg:gap-6 ml-auto">
+          {/* Navigation Tabs (Visible on tablet, desktop and preview pane) */}
+          <nav className="hidden sm:flex items-center gap-1 md:gap-1.5 xl:gap-2">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id || (item.id === 'home' && activeTab === 'home');
+              return (
+                <button
+                  key={item.id}
+                  onClick={item.action}
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 md:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer rounded-lg relative ${
+                    isActive
+                      ? 'text-[#cc0000] dark:text-red-400 font-extrabold'
+                      : 'text-slate-800 dark:text-slate-100 hover:text-[#cc0000] dark:hover:text-red-400 font-semibold'
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isActive ? 'text-[#cc0000] dark:text-red-400' : (item.iconColor || 'text-slate-600 dark:text-slate-300')}`} />
+                  <span>{item.label}</span>
+                  {isActive && (
+                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#cc0000] rounded-full" />
+                  )}
+                </button>
+              );
+            })}
+          </nav>
 
-        {/* Right Controls: Language Dropdown, Dark Mode & Menu */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Right Controls: Language Dropdown, Dark Mode & Menu */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
 
           {/* Language Selector: Globe Icon + Code (e.g., "EN ▾") */}
           <div className="relative" ref={langMenuRef}>
@@ -210,6 +212,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Menu className="w-5 h-5 text-slate-800 dark:text-slate-200" />
           </button>
+          </div>
         </div>
       </div>
 

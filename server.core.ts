@@ -509,19 +509,71 @@ async function getSheetsClient() {
   };
 }
 
-// In-memory cache synced with Cloud Firestore database
+// Ministry Ledger Disk & Firestore Persistence Helpers
+const ministryLedgerPath = path.join(process.cwd(), 'data', 'ministry_ledger.json');
+
+function readMinistryLedger(): {
+  villages: Village[];
+  events: EventData[];
+  teams: TeamMember[];
+  homePoster: any;
+  donationInfo: any;
+} {
+  try {
+    if (fs.existsSync(ministryLedgerPath)) {
+      const raw = fs.readFileSync(ministryLedgerPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      return {
+        villages: Array.isArray(parsed.villages) && parsed.villages.length > 0 ? parsed.villages : (initialDefaultData.villages as any),
+        events: Array.isArray(parsed.events) && parsed.events.length > 0 ? parsed.events : (initialDefaultData.events as any),
+        teams: Array.isArray(parsed.teams) && parsed.teams.length > 0 ? parsed.teams : (initialDefaultData.teams as any),
+        homePoster: parsed.homePoster ? { ...initialDefaultData.homePoster, ...parsed.homePoster } : initialDefaultData.homePoster,
+        donationInfo: parsed.donationInfo ? { ...initialDefaultData.donationInfo, ...parsed.donationInfo } : initialDefaultData.donationInfo,
+      };
+    }
+  } catch (err) {
+    console.warn('Notice reading ministry_ledger.json:', err);
+  }
+  return { ...initialDefaultData } as any;
+}
+
+function writeMinistryLedger(data: {
+  villages: Village[];
+  events: EventData[];
+  teams: TeamMember[];
+  homePoster: any;
+  donationInfo: any;
+}) {
+  try {
+    const dir = path.dirname(ministryLedgerPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(ministryLedgerPath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error writing ministry_ledger.json:', err);
+  }
+}
+
+// In-memory cache synced with disk ledger and Cloud Firestore database
 let dbData: {
   villages: Village[];
   events: EventData[];
   teams: TeamMember[];
   homePoster: any;
   donationInfo: any;
-} = { ...initialDefaultData } as any;
+} = readMinistryLedger();
 
-// Load live data from Firestore on server startup
+// Load live data from Firestore on server startup (merging with disk ledger)
 loadFirestoreData().then((data) => {
-  dbData = data;
-  console.log(`Cloud Firestore Database connected! Loaded ${data.villages.length} villages, ${data.events.length} events, ${data.teams.length} teams.`);
+  const disk = readMinistryLedger();
+  dbData = {
+    villages: Array.isArray(data.villages) && data.villages.length > 0 ? data.villages : disk.villages,
+    events: Array.isArray(data.events) && data.events.length > 0 ? data.events : disk.events,
+    teams: Array.isArray(data.teams) && data.teams.length > 0 ? data.teams : disk.teams,
+    homePoster: data.homePoster || disk.homePoster,
+    donationInfo: data.donationInfo || disk.donationInfo,
+  };
+  writeMinistryLedger(dbData);
+  console.log(`Cloud Firestore Database connected! Loaded ${dbData.villages.length} villages, ${dbData.events.length} events, ${dbData.teams.length} teams.`);
 }).catch((err) => {
   console.error('Initial Firestore loading error:', err);
 });
@@ -529,9 +581,16 @@ loadFirestoreData().then((data) => {
 // 1. Get Ministry Data (Villages, Events, Teams)
 app.get('/api/ministry-data', async (req, res) => {
   try {
-    const liveData = await loadFirestoreData();
-    dbData = liveData;
+    const disk = readMinistryLedger();
+    dbData = {
+      villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
+      events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
+      teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
+      homePoster: dbData.homePoster || disk.homePoster,
+      donationInfo: dbData.donationInfo || disk.donationInfo,
+    };
 
+    const finLedger = readFinanceLedger();
     res.json({
       success: true,
       villages: dbData.villages,
@@ -539,12 +598,13 @@ app.get('/api/ministry-data', async (req, res) => {
       teams: dbData.teams,
       homePoster: dbData.homePoster,
       donationInfo: dbData.donationInfo,
-      financeSettings: readFinanceLedger().financeSettings,
-      donations: readFinanceLedger().donations,
-      distributions: readFinanceLedger().distributions,
+      financeSettings: finLedger.financeSettings,
+      donations: finLedger.donations,
+      distributions: finLedger.distributions,
     });
   } catch (err: any) {
     console.error('Error fetching ministry data:', err?.message || err);
+    const finLedger = readFinanceLedger();
     res.json({
       success: true,
       villages: dbData.villages,
@@ -552,9 +612,9 @@ app.get('/api/ministry-data', async (req, res) => {
       teams: dbData.teams,
       homePoster: dbData.homePoster,
       donationInfo: dbData.donationInfo,
-      financeSettings: readFinanceLedger().financeSettings,
-      donations: readFinanceLedger().donations,
-      distributions: readFinanceLedger().distributions,
+      financeSettings: finLedger.financeSettings,
+      donations: finLedger.donations,
+      distributions: finLedger.distributions,
     });
   }
 });
@@ -898,7 +958,8 @@ app.post('/api/save-donation-info', async (req, res) => {
       hideDonationSection: dData.hideDonationSection !== undefined ? dData.hideDonationSection : (dData.hidden !== undefined ? dData.hidden : dbData.donationInfo.hideDonationSection),
       hideVisionMission: dData.hideVisionMission !== undefined ? dData.hideVisionMission : dbData.donationInfo.hideVisionMission,
     };
-    await saveDonationInfoToFirestore(dbData.donationInfo);
+    writeMinistryLedger(dbData);
+    saveDonationInfoToFirestore(dbData.donationInfo).catch((e) => console.warn('Firestore saveDonationInfo notice:', e?.message || e));
     res.json({ success: true, donationInfo: dbData.donationInfo });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.toString() });
@@ -945,7 +1006,8 @@ app.post('/api/save-home-poster', async (req, res) => {
       hidePoster: pData.hidePoster !== undefined ? pData.hidePoster : (pData.hidden !== undefined ? pData.hidden : dbData.homePoster.hidePoster),
       hideBokeoSection: pData.hideBokeoSection !== undefined ? pData.hideBokeoSection : dbData.homePoster.hideBokeoSection,
     };
-    await saveHomePosterToFirestore(dbData.homePoster);
+    writeMinistryLedger(dbData);
+    saveHomePosterToFirestore(dbData.homePoster).catch((e) => console.warn('Firestore saveHomePoster notice:', e?.message || e));
     res.json({ success: true, homePoster: dbData.homePoster });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.toString() });
@@ -1024,7 +1086,8 @@ app.post('/api/save-village', async (req, res) => {
       dbData.villages.push(newVillage);
     }
 
-    await saveVillageToFirestore(newVillage);
+    writeMinistryLedger(dbData);
+    saveVillageToFirestore(newVillage).catch((e) => console.warn('Firestore saveVillage notice:', e?.message || e));
 
     res.json({ success: true, village: newVillage });
   } catch (err: any) {
@@ -1037,7 +1100,8 @@ app.post('/api/delete-village', async (req, res) => {
   const { rowId, id } = req.body;
   try {
     dbData.villages = dbData.villages.filter((v) => v.rowId !== Number(rowId));
-    await deleteVillageFromFirestore(Number(rowId), id);
+    writeMinistryLedger(dbData);
+    deleteVillageFromFirestore(Number(rowId), id).catch((e) => console.warn('Firestore deleteVillage notice:', e?.message || e));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.toString() });
@@ -1154,7 +1218,8 @@ app.post('/api/save-event', async (req, res) => {
       dbData.events.unshift(newEvent);
     }
 
-    await saveEventToFirestore(newEvent);
+    writeMinistryLedger(dbData);
+    saveEventToFirestore(newEvent).catch((e) => console.warn('Firestore saveEvent notice:', e?.message || e));
 
     res.json({ success: true, event: newEvent });
   } catch (err: any) {
@@ -1169,7 +1234,8 @@ app.post('/api/delete-event', async (req, res) => {
     dbData.events = dbData.events.filter(
       (e) => (rowId && e.rowId !== Number(rowId)) && (!id || e.id !== id)
     );
-    await deleteEventFromFirestore(Number(rowId), id);
+    writeMinistryLedger(dbData);
+    deleteEventFromFirestore(Number(rowId), id).catch((e) => console.warn('Firestore deleteEvent notice:', e?.message || e));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.toString() });
@@ -1213,7 +1279,8 @@ app.post('/api/save-team', async (req, res) => {
       dbData.teams.push(newTeam);
     }
 
-    await saveTeamToFirestore(newTeam);
+    writeMinistryLedger(dbData);
+    saveTeamToFirestore(newTeam).catch((e) => console.warn('Firestore saveTeam notice:', e?.message || e));
 
     res.json({ success: true, team: newTeam });
   } catch (err: any) {
@@ -1226,7 +1293,8 @@ app.post('/api/delete-team', async (req, res) => {
   const { rowId } = req.body;
   try {
     dbData.teams = dbData.teams.filter((t) => t.rowId !== Number(rowId));
-    await deleteTeamFromFirestore(Number(rowId));
+    writeMinistryLedger(dbData);
+    deleteTeamFromFirestore(Number(rowId)).catch((e) => console.warn('Firestore deleteTeam notice:', e?.message || e));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.toString() });

@@ -1194,20 +1194,6 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                     }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
-                  <div className="absolute -bottom-px left-0 right-0 w-full overflow-hidden leading-none pointer-events-none z-10">
-                    <svg
-                      viewBox="0 0 1440 24"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="relative block w-full h-2 sm:h-2.5 text-white dark:text-slate-900"
-                      preserveAspectRatio="none"
-                    >
-                      <path
-                        d="M 0,14 C 180,22 360,22 540,13 C 660,6 800,6 920,13 C 1080,22 1280,22 1440,14 L 1440,24 L 0,24 Z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </div>
                 </div>
 
                 {/* Story Body */}
@@ -1242,23 +1228,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       {/* 5. WILL YOU PRAY WITH US? (PRAYER NEEDS BANNER - Mekong Sunset Landscape) */}
       {/* ========================================================================= */}
       {!homePoster?.hidePrayerSection && (
-        <section className="relative w-full overflow-hidden bg-slate-950 pt-10 pb-11 sm:pt-12 sm:pb-13 lg:pt-14 lg:pb-16 text-white select-none">
-          {/* Top subtle wave border edge of the poster */}
-          <div className="absolute -top-px left-0 right-0 w-full overflow-hidden leading-none pointer-events-none z-20">
-            <svg
-              viewBox="0 0 1440 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              className="relative block w-full h-2.5 sm:h-3 md:h-3.5 text-[#faf8f5] dark:text-slate-950"
-              preserveAspectRatio="none"
-            >
-              <path
-                d="M 0,0 L 1440,0 L 1440,10 C 1280,18 1080,18 920,11 C 800,4 660,4 540,11 C 360,18 180,18 0,10 Z"
-                fill="currentColor"
-              />
-            </svg>
-          </div>
-
+        <section className="relative w-full overflow-hidden bg-slate-950 py-10 sm:py-12 lg:py-14 text-white select-none">
           {/* Full panoramic sunset background image */}
           <div className="absolute inset-0 z-0">
             <img
@@ -1410,28 +1380,6 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               </div>
             )}
           </div>
-
-          {/* Bottom subtle wave border edge of the poster */}
-          <div className="absolute -bottom-px left-0 right-0 w-full overflow-hidden leading-none pointer-events-none z-20">
-            <svg
-              viewBox="0 0 1440 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              className="relative block w-full h-2.5 sm:h-3 md:h-3.5 text-[#faf8f5] dark:text-slate-950"
-              preserveAspectRatio="none"
-            >
-              <path
-                d="M 0,14 C 180,22 360,22 540,13 C 660,6 800,6 920,13 C 1080,22 1280,22 1440,14 L 1440,24 L 0,24 Z"
-                fill="currentColor"
-              />
-              <path
-                d="M 0,14 C 180,22 360,22 540,13 C 660,6 800,6 920,13 C 1080,22 1280,22 1440,14"
-                stroke="currentColor"
-                strokeOpacity="0.35"
-                strokeWidth="1.5"
-              />
-            </svg>
-          </div>
         </section>
       )}
 
@@ -1480,25 +1428,25 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       {/* Typing Prayer Popup Modal (Opens when clicking any Prayer Box) */}
       {activeTypingPrayerBox && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm animate-fade-in"
           onClick={() => setActiveTypingPrayerBox(null)}
         >
           <div
-            className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 space-y-5"
+            className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[78vh] my-auto flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div className="flex items-start gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-red-50 dark:bg-red-950/60 border border-red-100 dark:border-red-900/50 flex items-center justify-center shrink-0 text-[#cc0000]">
+            <div className="flex items-start justify-between gap-2.5 border-b border-slate-100 dark:border-slate-800 px-4 sm:px-5 pt-4 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-100 dark:border-red-900/50 flex items-center justify-center shrink-0 text-[#cc0000]">
                   {renderPrayerBoxIcon(activeTypingPrayerBox.icon)}
                 </div>
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-[#cc0000] dark:text-red-400">
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-[#cc0000] dark:text-red-400">
                       🙏 {language === 'lo' ? 'ຮ່ວມພິມຄຳອະທິຖານ' : language === 'th' ? 'ร่วมพิมพ์คำอธิษฐาน' : 'Join in Prayer'}
                     </span>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
                       {prayerCounts[activeTypingPrayerBox.id] ?? activeTypingPrayerBox.count ?? 50}{' '}
                       {language === 'lo'
                         ? (homePoster?.prayerPrayingCountSuffix || 'ຄົນກຳລັງອະທິຖານ')
@@ -1507,14 +1455,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                         : (homePoster?.prayerPrayingCountSuffixEn || 'praying')}
                     </span>
                   </div>
-                  <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white leading-snug">
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight">
                     {language === 'lo'
                       ? activeTypingPrayerBox.title
                       : language === 'th'
                       ? (activeTypingPrayerBox.titleTh || activeTypingPrayerBox.title)
                       : (activeTypingPrayerBox.titleEn || activeTypingPrayerBox.title)}
                   </h3>
-                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                     {language === 'lo'
                       ? activeTypingPrayerBox.subtitle
                       : language === 'th'
@@ -1527,174 +1475,177 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTypingPrayerBox(null)}
-                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 flex items-center justify-center cursor-pointer transition shrink-0"
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 flex items-center justify-center cursor-pointer transition shrink-0"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* Optional Prayer Prompt Description */}
-            {(activeTypingPrayerBox.desc || activeTypingPrayerBox.descEn || activeTypingPrayerBox.descTh) && (
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
-                {language === 'lo'
-                  ? activeTypingPrayerBox.desc
-                  : language === 'th'
-                  ? (activeTypingPrayerBox.descTh || activeTypingPrayerBox.desc)
-                  : (activeTypingPrayerBox.descEn || activeTypingPrayerBox.desc)}
-              </div>
-            )}
-
-            {/* Typing Prayer Form */}
-            <form onSubmit={handleSubmitTypedPrayer} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+            {/* Scrollable Body */}
+            <div className="px-4 sm:px-5 py-3.5 space-y-3 overflow-y-auto">
+              {/* Optional Prayer Prompt Description */}
+              {(activeTypingPrayerBox.desc || activeTypingPrayerBox.descEn || activeTypingPrayerBox.descTh) && (
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
                   {language === 'lo'
-                    ? 'ຊື່ຂອງທ່ານ (ບໍ່ບັງຄັບ)'
+                    ? activeTypingPrayerBox.desc
                     : language === 'th'
-                    ? 'ชื่อของคุณ (ไม่บังคับ)'
-                    : 'Your Name (Optional)'}
-                </label>
-                <input
-                  type="text"
-                  value={prayerAuthorName}
-                  onChange={(e) => setPrayerAuthorName(e.target.value)}
-                  placeholder={
-                    language === 'lo'
-                      ? 'ຕົວຢ່າງ: ພີ່ນ້ອງຈາກວຽງຈັນ...'
-                      : language === 'th'
-                      ? 'ตัวอย่าง: พี่น้องผู้ร่วมอธิษฐาน...'
-                      : 'e.g., A brother/sister in Christ...'
-                  }
-                  className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {language === 'lo'
-                    ? 'ພິມຄຳອະທິຖານຂອງທ່ານທີ່ນີ້'
-                    : language === 'th'
-                    ? 'พิมพ์คำอธิษฐานของคุณที่นี่'
-                    : 'Type Your Prayer Here'}
-                </label>
-                <textarea
-                  rows={3}
-                  autoFocus
-                  value={prayerMessageText}
-                  onChange={(e) => setPrayerMessageText(e.target.value)}
-                  placeholder={
-                    language === 'lo'
-                      ? 'ຂໍພຣະເຈົ້າຊົງອວຍພອນ ແລະ ນຳພາພັນທະກິດໃນຫົວຂໍ້ນີ້...'
-                      : language === 'th'
-                      ? 'ขอพระเจ้าทรงอวยพรและนำพันธกิจในหัวข้อนี้...'
-                      : 'Lord, we lift up this need in Bokeo to You...'
-                  }
-                  className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none resize-none"
-                />
-              </div>
-
-              {prayerSubmittedNotice && (
-                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-2 animate-fade-in">
-                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>
-                    {language === 'lo'
-                      ? 'ຂອບໃຈທີ່ຮ່ວມອະທິຖານ! ຄຳອະທິຖານຂອງທ່ານຖືກບັນທຶກແລ້ວ.'
-                      : language === 'th'
-                      ? 'ขอบคุณที่ร่วมอธิษฐาน! คำอธิษฐานของคุณถูกบันทึกแล้ว'
-                      : 'Thank you for praying! Your prayer has been recorded.'}
-                  </span>
+                    ? (activeTypingPrayerBox.descTh || activeTypingPrayerBox.desc)
+                    : (activeTypingPrayerBox.descEn || activeTypingPrayerBox.desc)}
                 </div>
               )}
 
-              <div className="flex items-center justify-between gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleTogglePray(activeTypingPrayerBox.id);
-                    setPrayerSubmittedNotice(true);
-                  }}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
-                    prayedItems[activeTypingPrayerBox.id]
-                      ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>
-                    {prayedItems[activeTypingPrayerBox.id]
-                      ? language === 'lo'
-                        ? 'ອະທິຖານແລ້ວ ✓'
-                        : 'Prayed ✓'
-                      : language === 'lo'
-                      ? 'ກົດຮ່ວມອະທິຖານ'
-                      : 'Quick Pray'}
-                  </span>
-                </button>
-
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 px-5 rounded-xl bg-[#cc0000] hover:bg-[#b30000] text-white text-xs sm:text-sm font-black shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>
+              {/* Typing Prayer Form */}
+              <form onSubmit={handleSubmitTypedPrayer} className="space-y-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                     {language === 'lo'
-                      ? 'ສົ່ງຄຳອະທິຖານ'
+                      ? 'ຊື່ຂອງທ່ານ (ບໍ່ບັງຄັບ)'
                       : language === 'th'
-                      ? 'ส่งคำอธิษฐาน'
-                      : 'Send Prayer'}
-                  </span>
-                </button>
-              </div>
-            </form>
+                      ? 'ชื่อของคุณ (ไม่บังคับ)'
+                      : 'Your Name (Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={prayerAuthorName}
+                    onChange={(e) => setPrayerAuthorName(e.target.value)}
+                    placeholder={
+                      language === 'lo'
+                        ? 'ຕົວຢ່າງ: ພີ່ນ້ອງຈາກວຽງຈັນ...'
+                        : language === 'th'
+                        ? 'ตัวอย่าง: พี่น้องผู้ร่วมอธิษฐาน...'
+                        : 'e.g., A brother/sister in Christ...'
+                    }
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none"
+                  />
+                </div>
 
-            {/* Recent Typed Prayers for this Box */}
-            {(() => {
-              const boxId = activeTypingPrayerBox.id;
-              const fromPoster =
-                activePrayerBoxes.find((b) => b.id === boxId)?.comments || [];
-              const fromLocal = localBoxComments[boxId] || [];
-              const mergedMap = new Map<string, TypedPrayerComment>();
-              [...fromLocal, ...fromPoster].forEach((c) => {
-                if (c && c.id && !mergedMap.has(c.id)) {
-                  mergedMap.set(c.id, c);
-                }
-              });
-              const allComments = Array.from(mergedMap.values());
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {language === 'lo'
+                      ? 'ພິມຄຳອະທິຖານຂອງທ່ານທີ່ນີ້'
+                      : language === 'th'
+                      ? 'พิมพ์คำอธิษฐานของคุณที่นี่'
+                      : 'Type Your Prayer Here'}
+                  </label>
+                  <textarea
+                    rows={2}
+                    autoFocus
+                    value={prayerMessageText}
+                    onChange={(e) => setPrayerMessageText(e.target.value)}
+                    placeholder={
+                      language === 'lo'
+                        ? 'ຂໍພຣະເຈົ້າຊົງອວຍພອນ ແລະ ນຳພາພັນທະກິດໃນຫົວຂໍ້ນີ້...'
+                        : language === 'th'
+                        ? 'ขอพระเจ้าทรงอวยพรและนำพันธกิจในหัวข้อนี้...'
+                        : 'Lord, we lift up this need in Bokeo to You...'
+                    }
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#cc0000] outline-none resize-none"
+                  />
+                </div>
 
-              if (allComments.length === 0) return null;
-
-              return (
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 dark:text-slate-300">
-                    <MessageSquare className="w-3.5 h-3.5 text-[#cc0000]" />
+                {prayerSubmittedNotice && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-[11px] font-bold flex items-center gap-2 animate-fade-in">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span>
                       {language === 'lo'
-                        ? `ຄຳອະທິຖານຈາກພີ່ນ້ອງ (${allComments.length})`
+                        ? 'ຂອບໃຈທີ່ຮ່ວມອະທິຖານ! ຄຳອະທິຖານຂອງທ່ານຖືກບັນທຶກແລ້ວ.'
                         : language === 'th'
-                        ? `คำอธิษฐานจากพี่น้อง (${allComments.length})`
-                        : `Prayers from Partners (${allComments.length})`}
+                        ? 'ขอบคุณที่ร่วมอธิษฐาน! คำอธิษฐานของคุณถูกบันทึกแล้ว'
+                        : 'Thank you for praying! Your prayer has been recorded.'}
                     </span>
                   </div>
-                  <div className="max-h-36 overflow-y-auto space-y-2 pr-1">
-                    {allComments.map((c) => (
-                      <div
-                        key={c.id}
-                        className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 text-xs space-y-0.5"
-                      >
-                        <div className="flex items-center justify-between text-[11px] text-slate-500">
-                          <span className="font-bold text-slate-800 dark:text-slate-200">
-                            🙏 {c.authorName || 'Prayer Partner'}
-                          </span>
-                        </div>
-                        <p className="text-slate-600 dark:text-slate-300 leading-relaxed break-words">
-                          {c.message}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleTogglePray(activeTypingPrayerBox.id);
+                      setPrayerSubmittedNotice(true);
+                    }}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                      prayedItems[activeTypingPrayerBox.id]
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>
+                      {prayedItems[activeTypingPrayerBox.id]
+                        ? language === 'lo'
+                          ? 'ອະທິຖານແລ້ວ ✓'
+                          : 'Prayed ✓'
+                        : language === 'lo'
+                        ? 'ກົດຮ່ວມອະທິຖານ'
+                        : 'Quick Pray'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 px-4 rounded-xl bg-[#cc0000] hover:bg-[#b30000] text-white text-xs font-black shadow-md hover:shadow-lg transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>
+                      {language === 'lo'
+                        ? 'ສົ່ງຄຳອະທິຖານ'
+                        : language === 'th'
+                        ? 'ส่งคำอธิษฐาน'
+                        : 'Send Prayer'}
+                    </span>
+                  </button>
                 </div>
-              );
-            })()}
+              </form>
+
+              {/* Recent Typed Prayers for this Box */}
+              {(() => {
+                const boxId = activeTypingPrayerBox.id;
+                const fromPoster =
+                  activePrayerBoxes.find((b) => b.id === boxId)?.comments || [];
+                const fromLocal = localBoxComments[boxId] || [];
+                const mergedMap = new Map<string, TypedPrayerComment>();
+                [...fromLocal, ...fromPoster].forEach((c) => {
+                  if (c && c.id && !mergedMap.has(c.id)) {
+                    mergedMap.set(c.id, c);
+                  }
+                });
+                const allComments = Array.from(mergedMap.values());
+
+                if (allComments.length === 0) return null;
+
+                return (
+                  <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-slate-700 dark:text-slate-300">
+                      <MessageSquare className="w-3.5 h-3.5 text-[#cc0000]" />
+                      <span>
+                        {language === 'lo'
+                          ? `ຄຳອະທິຖານຈາກພີ່ນ້ອງ (${allComments.length})`
+                          : language === 'th'
+                          ? `คำอธิษฐานจากพี่น้อง (${allComments.length})`
+                          : `Prayers from Partners (${allComments.length})`}
+                      </span>
+                    </div>
+                    <div className="max-h-24 overflow-y-auto space-y-1.5 pr-1">
+                      {allComments.map((c) => (
+                        <div
+                          key={c.id}
+                          className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 text-xs space-y-0.5"
+                        >
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span className="font-bold text-slate-800 dark:text-slate-200">
+                              🙏 {c.authorName || 'Prayer Partner'}
+                            </span>
+                          </div>
+                          <p className="text-slate-600 dark:text-slate-300 leading-relaxed break-words">
+                            {c.message}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
       )}
@@ -1702,18 +1653,18 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       {/* Interactive Prayer Needs Modal */}
       {isPrayerModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm animate-fade-in"
           onClick={() => setIsPrayerModalOpen(false)}
         >
           <div
-            className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 space-y-6"
+            className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[80vh] my-auto flex flex-col p-5 sm:p-6 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 shrink-0">
               <div className="flex items-center gap-2.5">
                 <span className="text-xl">🙏</span>
                 <div>
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                     {language === 'lo'
                       ? (homePoster?.prayerModalTitle || 'ຫົວຂໍ້ອະທິຖານເພື່ອແຂວງບໍ່ແກ້ວ')
                       : language === 'th'
@@ -1738,7 +1689,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               </button>
             </div>
 
-            <div className="space-y-3.5 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
               {(
                 homePoster?.prayerModalItems &&
                 Array.isArray(homePoster.prayerModalItems) &&
