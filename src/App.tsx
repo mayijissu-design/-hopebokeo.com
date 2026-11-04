@@ -29,7 +29,7 @@ import {
   initialDefaultData,
 } from './lib/firestore-service';
 import initialDefaultDonationBankAccounts from './data/donationBankAccounts.json';
-import { resolveUploadUrl, getCachedUploadUrl } from './utils/fileUploader';
+import { resolveUploadUrl, getCachedUploadUrl, normalizeUploadUrl } from './utils/fileUploader';
 import {
   getInitialActiveTab,
   persistActiveTab,
@@ -88,6 +88,88 @@ function safeCacheEvents(events: EventData[]) {
   } catch (err) {
     console.warn('Could not cache events to localStorage:', err);
   }
+}
+
+function sanitizeClientHomePoster(raw?: HomePoster): HomePoster | undefined {
+  const defaultPoster = initialDefaultData?.homePoster as HomePoster | undefined;
+  if (!raw && !defaultPoster) return undefined;
+  const poster = { ...(defaultPoster || {}), ...(raw || {}) } as HomePoster;
+
+  if (!poster.logoUrl || poster.logoUrl === '/uploads/inline_d892a5b8897e.jpg') {
+    poster.logoUrl = defaultPoster?.logoUrl || '/uploads/logo_1791212624840_1791212626418_663.png';
+  } else {
+    poster.logoUrl = normalizeUploadUrl(poster.logoUrl);
+  }
+
+  if (
+    !poster.bokeoImageUrl ||
+    poster.bokeoImageUrl.includes('photo-1542601906990-b4d3fb778b09') ||
+    poster.bokeoImageUrl.includes('unsplash.com')
+  ) {
+    poster.bokeoImageUrl =
+      defaultPoster?.bokeoImageUrl ||
+      '/uploads/416848893_1441279663411460_5205317115984311446_n__1__jpg_1788632235891_514.jpg';
+  } else {
+    poster.bokeoImageUrl = normalizeUploadUrl(poster.bokeoImageUrl);
+  }
+
+  if (!poster.upcomingEventImageUrl || poster.upcomingEventImageUrl.includes('unsplash.com')) {
+    poster.upcomingEventImageUrl =
+      defaultPoster?.upcomingEventImageUrl || '/uploads/upcoming_poster_1790760136318.jpg';
+  } else {
+    poster.upcomingEventImageUrl = normalizeUploadUrl(poster.upcomingEventImageUrl);
+  }
+
+  if (poster.videoUrl === '/uploads/img_1786429196319_5c9ce.jpg') {
+    poster.videoUrl = '';
+  }
+
+  if (!Array.isArray(poster.imageUrls) || poster.imageUrls.length < 4) {
+    if (defaultPoster?.imageUrls && defaultPoster.imageUrls.length >= 4) {
+      poster.imageUrls = defaultPoster.imageUrls;
+    }
+  } else {
+    poster.imageUrls = poster.imageUrls.map((u) => normalizeUploadUrl(u));
+  }
+
+  if (!Array.isArray(poster.bokeoTimeline) || poster.bokeoTimeline.length < 4) {
+    if (defaultPoster?.bokeoTimeline && defaultPoster.bokeoTimeline.length >= 4) {
+      poster.bokeoTimeline = defaultPoster.bokeoTimeline as any;
+    }
+  } else {
+    poster.bokeoTimeline = poster.bokeoTimeline.map((item) => ({
+      ...item,
+      imageUrl: normalizeUploadUrl(item.imageUrl || ''),
+      imageUrls: Array.isArray(item.imageUrls)
+        ? item.imageUrls.map((u) => normalizeUploadUrl(u))
+        : item.imageUrl
+        ? [normalizeUploadUrl(item.imageUrl)]
+        : [],
+    }));
+  }
+
+  return poster;
+}
+
+function sanitizeClientVillages(list: any[]): Village[] {
+  const defaultVillages = (initialDefaultData?.villages as Village[]) || [];
+  return list.map((v: any) => {
+    const def = defaultVillages.find((d) => d.id === v.id);
+    const rawLeaders = Number(v.leaders) || 0;
+    let imgUrl = normalizeUploadUrl(v.imageUrl || '');
+    if ((!imgUrl || imgUrl.includes('unsplash.com')) && def?.imageUrl) {
+      imgUrl = def.imageUrl;
+    }
+    return {
+      ...v,
+      imageUrl: imgUrl || v.imageUrl,
+      heard: Number(v.heard) || 0,
+      believers: Number(v.believers) || 0,
+      baptized: Number(v.baptized) || 0,
+      attending: typeof v.attending === 'number' ? v.attending : Number(v.attending) || 0,
+      leaders: rawLeaders < 0 ? 1 : rawLeaders === 0 && v.id === 'V8547' ? 1 : rawLeaders,
+    } as Village;
+  });
 }
 
 export default function App() {
@@ -316,24 +398,29 @@ export default function App() {
   // Data State with Instant Multi-Layer Local Storage Cache & Baseline Hydration
   const [villages, setVillages] = useState<Village[]>(() => {
     try {
-      const restoredVersion = localStorage.getItem('hb_ledger_restored_v3');
+      const restoredVersion = localStorage.getItem('hb_ledger_restored_v5');
       if (restoredVersion === 'true') {
         const cached = localStorage.getItem('hb_cached_villages');
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) return sanitizeClientVillages(parsed);
         }
       } else {
-        localStorage.setItem('hb_ledger_restored_v3', 'true');
-        localStorage.setItem('hb_cached_villages', JSON.stringify(initialDefaultData?.villages || []));
+        localStorage.setItem('hb_ledger_restored_v5', 'true');
+        const cleanInitialVillages = sanitizeClientVillages(initialDefaultData?.villages || []);
+        const cleanInitialPoster = sanitizeClientHomePoster(initialDefaultData?.homePoster as HomePoster | undefined);
+        localStorage.setItem('hb_cached_villages', JSON.stringify(cleanInitialVillages));
         localStorage.setItem('hb_cached_events', JSON.stringify(initialDefaultData?.events || []));
         localStorage.setItem('hb_cached_teams', JSON.stringify(initialDefaultData?.teams || []));
-        if (initialDefaultData?.homePoster) {
-          localStorage.setItem('hb_cached_home_poster', JSON.stringify(initialDefaultData.homePoster));
+        if (cleanInitialPoster) {
+          localStorage.setItem('hb_cached_home_poster', JSON.stringify(cleanInitialPoster));
+          if (cleanInitialPoster.logoUrl) {
+            localStorage.setItem('hb_custom_logo', cleanInitialPoster.logoUrl);
+          }
         }
       }
     } catch {}
-    return (initialDefaultData?.villages as Village[]) || [];
+    return sanitizeClientVillages((initialDefaultData?.villages as Village[]) || []);
   });
   const [events, setEvents] = useState<EventData[]>(() => {
     try {
@@ -360,10 +447,10 @@ export default function App() {
       const cached = localStorage.getItem('hb_cached_home_poster');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed && parsed.title) return parsed;
+        if (parsed && parsed.title) return sanitizeClientHomePoster(parsed);
       }
     } catch {}
-    return (initialDefaultData?.homePoster as HomePoster) || undefined;
+    return sanitizeClientHomePoster(initialDefaultData?.homePoster as HomePoster | undefined);
   });
   const [donationInfo, setDonationInfo] = useState<DonationInfo | undefined>(() => {
     const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
@@ -488,17 +575,7 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           if (Array.isArray(data.villages) && data.villages.length > 0) {
-            const cleanVillages = data.villages.map((v: any) => {
-              const rawLeaders = Number(v.leaders) || 0;
-              return {
-                ...v,
-                heard: Number(v.heard) || 0,
-                believers: Number(v.believers) || 0,
-                baptized: Number(v.baptized) || 0,
-                attending: typeof v.attending === 'number' ? v.attending : (Number(v.attending) || 0),
-                leaders: rawLeaders < 0 ? 1 : rawLeaders,
-              };
-            });
+            const cleanVillages = sanitizeClientVillages(data.villages);
             setVillages(cleanVillages);
             try {
               localStorage.setItem('hb_cached_villages', JSON.stringify(cleanVillages));
@@ -521,14 +598,16 @@ export default function App() {
 
           if (data.homePoster) {
             setHomePoster((prev) => {
-              const merged = { ...(prev || {}), ...data.homePoster } as HomePoster;
-              try {
-                localStorage.setItem('hb_cached_home_poster', JSON.stringify(merged));
-                if (merged.logoUrl) {
-                  localStorage.setItem('hb_custom_logo', merged.logoUrl);
-                  window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: merged.logoUrl }));
-                }
-              } catch {}
+              const merged = sanitizeClientHomePoster({ ...(prev || {}), ...data.homePoster } as HomePoster);
+              if (merged) {
+                try {
+                  localStorage.setItem('hb_cached_home_poster', JSON.stringify(merged));
+                  if (merged.logoUrl) {
+                    localStorage.setItem('hb_custom_logo', merged.logoUrl);
+                    window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: merged.logoUrl }));
+                  }
+                } catch {}
+              }
               return merged;
             });
           }
@@ -651,19 +730,11 @@ export default function App() {
     try {
       unsubVillages = onSnapshot(collection(db, 'villages'), (snapshot) => {
         if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => {
-            const data = d.data();
-            const rawLeaders = Number(data.leaders) || 0;
-            return {
-              id: d.id,
-              ...data,
-              heard: Number(data.heard) || 0,
-              believers: Number(data.believers) || 0,
-              baptized: Number(data.baptized) || 0,
-              attending: typeof data.attending === 'number' ? data.attending : (Number(data.attending) || 0),
-              leaders: rawLeaders < 0 ? 1 : rawLeaders,
-            } as Village;
-          });
+          const rawList = snapshot.docs.map((d) => ({
+            id: d.id,
+            ...d.data(),
+          }));
+          const list = sanitizeClientVillages(rawList);
           setVillages(list);
           try { localStorage.setItem('hb_cached_villages', JSON.stringify(list)); } catch {}
           setIsLoading(false);
@@ -694,18 +765,20 @@ export default function App() {
 
       unsubHomePoster = onSnapshot(doc(db, 'app_config', 'homePoster'), (snapshot) => {
         if (snapshot.exists()) {
-          const data = snapshot.data() as HomePoster;
-          setHomePoster(data);
-          try {
-            localStorage.setItem('hb_cached_home_poster', JSON.stringify(data));
-            if (data.logoUrl) {
-              localStorage.setItem('hb_custom_logo', data.logoUrl);
-              window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: data.logoUrl }));
-            } else if (data.logoUrl === '') {
-              localStorage.removeItem('hb_custom_logo');
-              window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: '/hb-logo.svg' }));
-            }
-          } catch {}
+          const data = sanitizeClientHomePoster(snapshot.data() as HomePoster);
+          if (data) {
+            setHomePoster(data);
+            try {
+              localStorage.setItem('hb_cached_home_poster', JSON.stringify(data));
+              if (data.logoUrl) {
+                localStorage.setItem('hb_custom_logo', data.logoUrl);
+                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: data.logoUrl }));
+              } else if (data.logoUrl === '') {
+                localStorage.removeItem('hb_custom_logo');
+                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: '/hb-logo.svg' }));
+              }
+            } catch {}
+          }
         }
       }, (err) => {
         console.warn('Home poster sync notice (offline or reconnecting):', err?.message || err);

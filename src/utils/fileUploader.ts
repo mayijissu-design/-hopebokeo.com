@@ -22,6 +22,23 @@ export interface UploadResult {
 const CHUNK_SIZE = 650000; // ~650KB base64 per chunk, well below Firestore's 1MB limit
 const uploadBlobUrlCache = new Map<string, string>();
 const pendingResolutions = new Map<string, Promise<string>>();
+const failedResolutionCache = new Set<string>();
+let firestoreQuotaCoolingUntil = 0;
+
+/**
+ * Strips any temporary preview or localhost origin from an `/uploads/...` URL so that
+ * stored and rendered URLs are always clean, portable `/uploads/<filename>` paths.
+ */
+export function normalizeUploadUrl(url?: string): string {
+  if (!url || typeof url !== 'string') return url || '';
+  const trimmed = url.trim();
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
+  const match = trimmed.match(/^(?:https?:\/\/[^/]+)?(\/uploads\/[^?#]+)(.*)$/i);
+  if (match) {
+    return `${match[1]}${match[2] || ''}`;
+  }
+  return trimmed;
+}
 
 function inferExtFromFile(file: File): string {
   if (file.name && file.name.includes('.')) {
@@ -82,26 +99,32 @@ function base64ToBlobUrl(base64Data: string, mimeType: string): string {
 
 export function getCachedUploadUrl(url?: string): string {
   if (!url || typeof url !== 'string') return url || '';
-  const match = url.match(/\/uploads\/([^?#]+)/);
-  if (!match) return url;
-  const normalizedKey = `/uploads/${match[1]}`;
-  return uploadBlobUrlCache.get(normalizedKey) || url;
+  const cleanUrl = normalizeUploadUrl(url);
+  const match = cleanUrl.match(/\/uploads\/([^?#]+)/);
+  if (!match) return cleanUrl;
+  const normalizedKey = `/uploads/${decodeURIComponent(match[1])}`;
+  return uploadBlobUrlCache.get(normalizedKey) || cleanUrl;
 }
 
 /**
  * Resolves an `/uploads/:filename` path from Cloud Firestore `uploaded_files` / `uploaded_file_chunks`
- * into a 100% original-quality `blob:` URL when static hosting (e.g. Netlify) does not have the file on disk.
+ * into a 100% original-quality `blob:` URL ONLY when static hosting does not have the file on disk.
  */
 export async function resolveUploadUrl(url: string): Promise<string> {
   if (!url || typeof url !== 'string') return url || '';
-  const match = url.match(/\/uploads\/([^?#]+)/);
-  if (!match) return url;
+  const cleanUrl = normalizeUploadUrl(url);
+  const match = cleanUrl.match(/\/uploads\/([^?#]+)/);
+  if (!match) return cleanUrl;
 
   const filename = decodeURIComponent(match[1]);
   const normalizedKey = `/uploads/${filename}`;
 
   const cached = uploadBlobUrlCache.get(normalizedKey);
   if (cached) return cached;
+
+  if (failedResolutionCache.has(normalizedKey) || Date.now() < firestoreQuotaCoolingUntil) {
+    return cleanUrl;
+  }
 
   const inflight = pendingResolutions.get(normalizedKey);
   if (inflight) return inflight;
@@ -136,12 +159,17 @@ export async function resolveUploadUrl(url: string): Promise<string> {
           return blobUrl;
         }
       }
-    } catch (err) {
-      console.warn('Firestore /uploads/ resolution notice:', err);
+      failedResolutionCache.add(normalizedKey);
+    } catch (err: any) {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota')) {
+        firestoreQuotaCoolingUntil = Date.now() + 5 * 60 * 1000;
+      }
+      failedResolutionCache.add(normalizedKey);
     } finally {
       pendingResolutions.delete(normalizedKey);
     }
-    return url;
+    return cleanUrl;
   })();
 
   pendingResolutions.set(normalizedKey, promise);
@@ -362,6 +390,10 @@ export function initGlobalUploadUrlResolver(): void {
       return;
     }
 
+    if (failedResolutionCache.has(normalizedKey) || Date.now() < firestoreQuotaCoolingUntil) {
+      return;
+    }
+
     resolveUploadUrl(normalizedKey)
       .then((resolvedUrl) => {
         if (resolvedUrl && resolvedUrl !== normalizedKey && resolvedUrl !== rawSrc) {
@@ -389,12 +421,21 @@ export function initGlobalUploadUrlResolver(): void {
     true
   );
 
-  // 2. Proactive observer for any <img src="/uploads/..."> added or updated in DOM
+  // 2. Observer that normalizes any temporary preview host prefix (`https://ais-dev-.../uploads/...`)
+  //    to a clean relative `/uploads/...` path and applies in-memory blob cache if present,
+  //    without querying Firestore unless the static file fails to load.
   const upgradeImgElement = (img: HTMLImageElement) => {
     const rawSrc = img.getAttribute('src') || '';
     if (!rawSrc.includes('/uploads/')) return;
-    img.dataset.originalUploadSrc = rawSrc;
-    resolveImgFromFirestore(img, rawSrc);
+    const cleanSrc = normalizeUploadUrl(rawSrc);
+    if (cleanSrc !== rawSrc) {
+      img.setAttribute('src', cleanSrc);
+    }
+    img.dataset.originalUploadSrc = cleanSrc;
+    const cached = uploadBlobUrlCache.get(cleanSrc);
+    if (cached && img.src !== cached) {
+      img.src = cached;
+    }
   };
 
   if (typeof MutationObserver !== 'undefined') {

@@ -46,7 +46,7 @@ const TimelineImageSlideshow: React.FC<TimelineImageSlideshowProps> = ({
             className={`absolute inset-0 w-full h-full object-cover block transition-opacity duration-700 ease-in-out select-none ${
               idx === currentIndex ? 'opacity-100 scale-100' : 'opacity-0 scale-105 pointer-events-none'
             }`}
-            onError={handleImageErrorWithFirestore('https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?q=80&w=1200')}
+            onError={handleImageErrorWithFirestore('/uploads/timeline_0_0_1790760136842.jpg')}
             referrerPolicy="no-referrer"
           />
         ))}

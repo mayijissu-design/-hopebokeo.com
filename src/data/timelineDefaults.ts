@@ -38,6 +38,23 @@ export const DEFAULT_BOKEO_TIMELINE: MinistryTimelineItem[] = [
     hidden: false,
   },
   {
+    id: 'timeline-2022',
+    year: '2023 - 2024',
+    date: '2023 - 2024',
+    title: 'ພັນທະກິດເດັກ, ຊາວໜຸ່ມ ແລະ ການສ້າງສາວົກ',
+    titleEn: 'Children & Youth Ministry and Discipleship',
+    titleTh: 'พันธกิจเด็ก เยาวชน และการสร้างสาวก',
+    description: 'ຂະຫຍາຍວຽກງານການສອນພຣະຄຳພີ ແລະ ພາສາລາວໃຫ້ແກ່ເດັກນ້ອຍ, ຈັດຄ້າຍຟື້ນຟູຊາວໜຸ່ມ ແລະ ສ້າງສາວົກຮຸ່ນໃໝ່ໃຫ້ເຕີບໃຫຍ່ໃນຄວາມເຊື່ອ ແລະ ຄວາມຮັກຂອງພຣະເຈົ້າ.',
+    descriptionEn: 'Expanding Bible and literacy teaching for children, organizing youth revival camps, and raising a new generation of disciples grounded in faith and love.',
+    descriptionTh: 'ขยายงานการสอนพระคัมภีร์และภาษาลาวแก่เด็กๆ จัดค่ายฟื้นฟูเยาวชน และสร้างสาวกรุ่นใหม่ให้เติบโตในความเชื่อและความรักของพระเจ้า',
+    imageUrl: '/uploads/timeline_2_0_1790760138092.jpg',
+    imageUrls: [
+      '/uploads/timeline_2_0_1790760138092.jpg',
+    ],
+    order: 3,
+    hidden: false,
+  },
+  {
     id: 'timeline-2025',
     year: '2024 - ປັດຈຸບັນ',
     date: '2024 - ປັດຈຸບັນ',
@@ -52,8 +69,9 @@ export const DEFAULT_BOKEO_TIMELINE: MinistryTimelineItem[] = [
       '/uploads/timeline_3_0_1790760138340.jpg',
       '/uploads/timeline_3_1_1790760138587.jpg',
     ],
-    order: 3,
+    order: 4,
     hidden: false,
   },
 ];
+
 

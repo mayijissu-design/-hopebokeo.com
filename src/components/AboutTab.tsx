@@ -70,10 +70,15 @@ export const AboutTab: React.FC<AboutTabProps> = ({
   const heroBannerImage =
     "/uploads/d1ff2c16-9f00-4563-a7e3-a34ec0649a7f_1788761811029_129.jpg";
 
+  const defaultWhoWeAreLocalImage =
+    "/uploads/416848893_1441279663411460_5205317115984311446_n__1__jpg_1788632235891_514.jpg";
+
   const whoWeAreImage =
-    homePoster?.bokeoImageUrl && homePoster.bokeoImageUrl.trim() !== ""
+    homePoster?.bokeoImageUrl &&
+    homePoster.bokeoImageUrl.trim() !== "" &&
+    !homePoster.bokeoImageUrl.includes("photo-1542601906990-b4d3fb778b09")
       ? homePoster.bokeoImageUrl
-      : "/uploads/416848893_1441279663411460_5205317115984311446_n__1__jpg_1788632235891_514.jpg";
+      : defaultWhoWeAreLocalImage;
 
   const posterBannerTitle =
     language === "lo"
@@ -141,13 +146,17 @@ export const AboutTab: React.FC<AboutTabProps> = ({
       homePoster?.bokeoTimeline && homePoster.bokeoTimeline.length > 0
         ? [...homePoster.bokeoTimeline]
         : [...DEFAULT_BOKEO_TIMELINE];
-    // If Firestore had the earlier 3-item seed (2018, 2020, 2022 - 2023) without 2024, ensure 2024 - ປັດຈຸບັນ is present
+    // If stored timeline had the legacy 3-item seed without the 3rd milestone (timeline_2_0), restore all 4 default milestones
     if (
       raw.length === 3 &&
-      !raw.some((item) => item.year && item.year.includes("2024")) &&
-      DEFAULT_BOKEO_TIMELINE[3]
+      !raw.some((item) => item.id === "timeline-2022" || (item.imageUrl && item.imageUrl.includes("timeline_2_0")))
     ) {
-      raw.push(DEFAULT_BOKEO_TIMELINE[3]);
+      return [
+        raw[0] || DEFAULT_BOKEO_TIMELINE[0],
+        raw[1] || DEFAULT_BOKEO_TIMELINE[1],
+        DEFAULT_BOKEO_TIMELINE[2],
+        { ...(raw[2] || DEFAULT_BOKEO_TIMELINE[3]), order: 4 },
+      ];
     }
     return raw;
   }, [homePoster?.bokeoTimeline]);

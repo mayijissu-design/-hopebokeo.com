@@ -45,16 +45,6 @@ export const UnifiedMediaUploader: React.FC<UnifiedMediaUploaderProps> = ({
     setPreviewHidden(false);
     const cached = getCachedUploadUrl(value);
     setPreviewSrc(cached);
-    if (value && value.startsWith("/uploads/") && cached === value) {
-      resolveUploadUrl(value)
-        .then((resolved) => {
-          if (resolved && resolved !== value) {
-            setPreviewSrc(resolved);
-            setPreviewHidden(false);
-          }
-        })
-        .catch(() => {});
-    }
   }, [value]);
 
   const defaultAccept =

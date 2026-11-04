@@ -163,8 +163,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
   // If there is no title, date, image or description, do not render
   if (!title && !date && !imageUrl && !desc) return null;
 
-  const defaultBg =
-    'https://images.unsplash.com/photo-1511578314322-379afb476865?q=80&w=1600&auto=format&fit=crop';
+  const defaultBg = '/uploads/upcoming_poster_1790760136318.jpg';
   const finalBgImage = imageUrl || defaultBg;
 
   // CSS mask for smooth top & bottom edge fade without visible borders
@@ -206,7 +205,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
         )}
 
         {/* Background image: completely hidden when visibilityRatio is 0 */}
-        {visibilityRatio > 0 && imageUrl && (
+        {visibilityRatio > 0 && finalBgImage && (
           <img
             src={finalBgImage}
             alt={title || 'Upcoming Event Poster'}
@@ -219,12 +218,7 @@ export const UpcomingEventPoster: React.FC<UpcomingEventPosterProps> = ({
               backfaceVisibility: 'hidden',
               transform: 'translateZ(0)',
             }}
-            onError={(e) => {
-              const target = e.currentTarget;
-              if (defaultBg && target.src !== defaultBg && !target.src.endsWith(defaultBg)) {
-                target.src = defaultBg;
-              }
-            }}
+            onError={handleImageErrorWithFirestore(defaultBg)}
           />
         )}
 

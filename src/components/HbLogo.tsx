@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getCachedUploadUrl, resolveUploadUrl } from '../utils/fileUploader';
+import { getCachedUploadUrl, resolveUploadUrl, normalizeUploadUrl } from '../utils/fileUploader';
 
 interface HbLogoProps {
   className?: string;
@@ -7,6 +7,18 @@ interface HbLogoProps {
   alt?: string;
   logoUrl?: string;
   disableDarkOutline?: boolean;
+}
+
+const DEFAULT_OFFICIAL_LOGO = '/uploads/logo_1791212624840_1791212626418_663.png';
+
+function sanitizeLogoCandidate(candidate?: string | null): string {
+  if (!candidate || typeof candidate !== 'string') return '';
+  const clean = normalizeUploadUrl(candidate.trim());
+  // Upgrade legacy JPEG logo with white background to the official transparent PNG logo
+  if (clean === '/uploads/inline_d892a5b8897e.jpg') {
+    return DEFAULT_OFFICIAL_LOGO;
+  }
+  return clean;
 }
 
 export const HbLogo: React.FC<HbLogoProps> = ({
@@ -17,23 +29,25 @@ export const HbLogo: React.FC<HbLogoProps> = ({
   disableDarkOutline = false,
 }) => {
   const [currentLogo, setCurrentLogo] = useState<string>(() => {
-    if (logoUrl) return getCachedUploadUrl(logoUrl);
+    const cleanProp = sanitizeLogoCandidate(logoUrl);
+    if (cleanProp) return getCachedUploadUrl(cleanProp);
     try {
-      const saved = localStorage.getItem('hb_custom_logo');
+      const saved = sanitizeLogoCandidate(localStorage.getItem('hb_custom_logo'));
       if (saved) return getCachedUploadUrl(saved);
     } catch {
       // ignore
     }
-    return '/hb-logo.svg';
+    return DEFAULT_OFFICIAL_LOGO;
   });
 
   useEffect(() => {
-    let target = '/hb-logo.svg';
-    if (logoUrl) {
-      target = logoUrl;
+    let target = DEFAULT_OFFICIAL_LOGO;
+    const cleanProp = sanitizeLogoCandidate(logoUrl);
+    if (cleanProp) {
+      target = cleanProp;
     } else {
       try {
-        const saved = localStorage.getItem('hb_custom_logo');
+        const saved = sanitizeLogoCandidate(localStorage.getItem('hb_custom_logo'));
         if (saved) {
           target = saved;
         }
@@ -41,37 +55,18 @@ export const HbLogo: React.FC<HbLogoProps> = ({
         // ignore
       }
     }
-    const cached = getCachedUploadUrl(target);
-    setCurrentLogo(cached);
-    if (target.startsWith('/uploads/') && cached === target) {
-      resolveUploadUrl(target)
-        .then((resolved) => {
-          if (resolved && resolved !== target) {
-            setCurrentLogo(resolved);
-          }
-        })
-        .catch(() => {});
-    }
+    setCurrentLogo(getCachedUploadUrl(target));
   }, [logoUrl]);
 
   // Listen to custom logo updates in real-time
   useEffect(() => {
     const handleLogoUpdate = (e: any) => {
       if (e?.detail && typeof e.detail === 'string') {
-        const target = e.detail;
+        const target = sanitizeLogoCandidate(e.detail) || DEFAULT_OFFICIAL_LOGO;
         setCurrentLogo(getCachedUploadUrl(target));
-        if (target.startsWith('/uploads/')) {
-          resolveUploadUrl(target)
-            .then((resolved) => {
-              if (resolved && resolved !== target) {
-                setCurrentLogo(resolved);
-              }
-            })
-            .catch(() => {});
-        }
       } else {
         try {
-          const saved = localStorage.getItem('hb_custom_logo');
+          const saved = sanitizeLogoCandidate(localStorage.getItem('hb_custom_logo'));
           if (saved) {
             setCurrentLogo(getCachedUploadUrl(saved));
             return;
@@ -104,6 +99,8 @@ export const HbLogo: React.FC<HbLogoProps> = ({
             .then((resolved) => {
               if (resolved && resolved !== currentLogo) {
                 setCurrentLogo(resolved);
+              } else if (currentLogo !== DEFAULT_OFFICIAL_LOGO) {
+                setCurrentLogo(DEFAULT_OFFICIAL_LOGO);
               } else {
                 setCurrentLogo('/hb-logo.svg');
               }

@@ -234,10 +234,32 @@ const uploadHandler = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // Supports up to 100MB
 });
 
+function mirrorUploadToDist(filename: string, buf: Buffer) {
+  try {
+    const distUploadsDir = path.join(process.cwd(), 'dist', 'uploads');
+    if (fs.existsSync(path.join(process.cwd(), 'dist'))) {
+      if (!fs.existsSync(distUploadsDir)) {
+        fs.mkdirSync(distUploadsDir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(distUploadsDir, filename), buf);
+    }
+  } catch {}
+}
+
+function stripPreviewOriginFromUploadUrl(val: string): string {
+  if (!val || typeof val !== 'string') return val;
+  const trimmed = val.trim();
+  const match = trimmed.match(/^(?:https?:\/\/[^/]+)?(\/uploads\/[^?#]+)(.*)$/i);
+  if (match) {
+    return `${match[1]}${match[2] || ''}`;
+  }
+  return trimmed;
+}
+
 // Helper to convert any base64 data URLs to stored disk files to prevent Firestore 1MB limits & RAM crashes
 function extractBase64DocToUpload(urlOrBase64: string, prefix = 'doc'): string {
   if (!urlOrBase64 || typeof urlOrBase64 !== 'string') return urlOrBase64 || '';
-  if (!urlOrBase64.startsWith('data:')) return urlOrBase64;
+  if (!urlOrBase64.startsWith('data:')) return stripPreviewOriginFromUploadUrl(urlOrBase64);
 
   try {
     const match = urlOrBase64.match(/^data:([^;]+);base64,(.+)$/);
@@ -249,12 +271,15 @@ function extractBase64DocToUpload(urlOrBase64: string, prefix = 'doc'): string {
     else if (mime.includes('png')) ext = '.png';
     else if (mime.includes('jpeg') || mime.includes('jpg')) ext = '.jpg';
     else if (mime.includes('webp')) ext = '.webp';
+    else if (mime.includes('svg')) ext = '.svg';
+    else if (mime.includes('gif')) ext = '.gif';
     else if (mime.includes('word') || mime.includes('docx')) ext = '.docx';
 
     const filename = `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
     const targetPath = path.join(uploadsDir, filename);
     const buf = Buffer.from(rawBase64, 'base64');
     fs.writeFileSync(targetPath, buf);
+    mirrorUploadToDist(filename, buf);
     persistUploadedFile(filename, buf, mime).catch(() => {});
     return `/uploads/${filename}`;
   } catch (err) {
@@ -263,8 +288,25 @@ function extractBase64DocToUpload(urlOrBase64: string, prefix = 'doc'): string {
   }
 }
 
-// Retain base64 images directly so they are stored permanently in Firestore
-function processBase64ImagesInObject(obj: any): any {
+// Recursively convert any base64 data URLs or temporary preview URLs into permanent /uploads/<filename> paths
+function processBase64ImagesInObject(obj: any, keyHint = 'asset'): any {
+  if (!obj) return obj;
+  if (typeof obj === 'string') {
+    if (obj.startsWith('data:image/') || obj.startsWith('data:application/pdf')) {
+      return extractBase64DocToUpload(obj, keyHint);
+    }
+    return stripPreviewOriginFromUploadUrl(obj);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item, idx) => processBase64ImagesInObject(item, `${keyHint}_${idx}`));
+  }
+  if (typeof obj === 'object') {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = processBase64ImagesInObject(v, k);
+    }
+    return out;
+  }
   return obj;
 }
 
@@ -288,6 +330,7 @@ app.post('/api/upload-file', uploadHandler.single('file') as any, async (req, re
       const diskPath = path.join(uploadsDir, req.file.filename);
       if (fs.existsSync(diskPath)) {
         const buf = fs.readFileSync(diskPath);
+        mirrorUploadToDist(req.file.filename, buf);
         await persistUploadedFile(
           req.file.filename,
           buf,
@@ -503,6 +546,33 @@ async function getSheetsClient() {
 
 // Ministry Ledger Disk & Firestore Persistence Helpers
 const ministryLedgerPath = path.join(process.cwd(), 'data', 'ministry_ledger.json');
+const srcMinistryDefaultsPath = path.join(process.cwd(), 'src', 'data', 'ministryDefaults.json');
+
+function sanitizeHomePosterAssets(poster: any, fallbackPoster: any): any {
+  const merged = { ...(fallbackPoster || {}), ...(poster || {}) };
+  if (merged.logoUrl === '/uploads/inline_d892a5b8897e.jpg' || !merged.logoUrl) {
+    merged.logoUrl = '/uploads/logo_1791212624840_1791212626418_663.png';
+  }
+  if (!merged.bokeoImageUrl || merged.bokeoImageUrl.includes('photo-1542601906990-b4d3fb778b09')) {
+    merged.bokeoImageUrl = '/uploads/416848893_1441279663411460_5205317115984311446_n__1__jpg_1788632235891_514.jpg';
+  }
+  if (!merged.upcomingEventImageUrl) {
+    merged.upcomingEventImageUrl = '/uploads/upcoming_poster_1790760136318.jpg';
+  }
+  if (merged.videoUrl === '/uploads/img_1786429196319_5c9ce.jpg') {
+    merged.videoUrl = '';
+  }
+  if (
+    Array.isArray(merged.bokeoTimeline) &&
+    merged.bokeoTimeline.length === 3 &&
+    !merged.bokeoTimeline.some((t: any) => t.id === 'timeline-2022' || (t.imageUrl && t.imageUrl.includes('timeline_2_0'))) &&
+    Array.isArray(fallbackPoster?.bokeoTimeline) &&
+    fallbackPoster.bokeoTimeline.length >= 4
+  ) {
+    merged.bokeoTimeline = fallbackPoster.bokeoTimeline;
+  }
+  return merged;
+}
 
 function readMinistryLedger(): {
   villages: Village[];
@@ -519,7 +589,7 @@ function readMinistryLedger(): {
         villages: Array.isArray(parsed.villages) && parsed.villages.length > 0 ? parsed.villages : (initialDefaultData.villages as any),
         events: Array.isArray(parsed.events) && parsed.events.length > 0 ? parsed.events : (initialDefaultData.events as any),
         teams: Array.isArray(parsed.teams) && parsed.teams.length > 0 ? parsed.teams : (initialDefaultData.teams as any),
-        homePoster: parsed.homePoster ? { ...initialDefaultData.homePoster, ...parsed.homePoster } : initialDefaultData.homePoster,
+        homePoster: sanitizeHomePosterAssets(parsed.homePoster, initialDefaultData.homePoster),
         donationInfo: parsed.donationInfo ? { ...initialDefaultData.donationInfo, ...parsed.donationInfo } : initialDefaultData.donationInfo,
       };
     }
@@ -537,9 +607,23 @@ function writeMinistryLedger(data: {
   donationInfo: any;
 }) {
   try {
+    const cleanData = processBase64ImagesInObject({
+      ...data,
+      homePoster: sanitizeHomePosterAssets(data.homePoster, initialDefaultData.homePoster),
+    });
+    const serialized = JSON.stringify(cleanData, null, 2);
+
     const dir = path.dirname(ministryLedgerPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(ministryLedgerPath, JSON.stringify(data, null, 2), 'utf8');
+    fs.writeFileSync(ministryLedgerPath, serialized, 'utf8');
+
+    // Mirror to src/data/ministryDefaults.json so static builds & deployments always match 100%
+    try {
+      const srcDir = path.dirname(srcMinistryDefaultsPath);
+      if (fs.existsSync(srcDir)) {
+        fs.writeFileSync(srcMinistryDefaultsPath, serialized, 'utf8');
+      }
+    } catch {}
   } catch (err) {
     console.error('Error writing ministry_ledger.json:', err);
   }
@@ -554,42 +638,65 @@ let dbData: {
   donationInfo: any;
 } = readMinistryLedger();
 
+let lastMinistryFirestoreSyncAt = 0;
+let lastFinanceFirestoreSyncAt = 0;
+const FIRESTORE_SYNC_TTL_MS = 120 * 1000; // 2 minutes TTL to avoid exhausting Firestore read quota
+
 // Load live data from Firestore on server startup (merging with disk ledger)
 loadFirestoreData().then((data) => {
+  lastMinistryFirestoreSyncAt = Date.now();
   const disk = readMinistryLedger();
   dbData = {
     villages: Array.isArray(data.villages) && data.villages.length > 0 ? data.villages : disk.villages,
     events: Array.isArray(data.events) && data.events.length > 0 ? data.events : disk.events,
     teams: Array.isArray(data.teams) && data.teams.length > 0 ? data.teams : disk.teams,
-    homePoster: data.homePoster || disk.homePoster,
+    homePoster: sanitizeHomePosterAssets(data.homePoster || disk.homePoster, disk.homePoster),
     donationInfo: data.donationInfo || disk.donationInfo,
   };
   writeMinistryLedger(dbData);
   console.log(`Cloud Firestore Database connected! Loaded ${dbData.villages.length} villages, ${dbData.events.length} events, ${dbData.teams.length} teams.`);
 }).catch((err) => {
+  lastMinistryFirestoreSyncAt = Date.now();
   console.error('Initial Firestore loading error:', err);
 });
 
-// 1. Get Ministry Data (Villages, Events, Teams) - Always synced with Cloud Firestore
+// 1. Get Ministry Data (Villages, Events, Teams) - Always synced with Cloud Firestore & Disk Ledger
 app.get('/api/ministry-data', async (req, res) => {
   try {
     const disk = readMinistryLedger();
-    try {
-      const fsData = await loadFirestoreData();
-      dbData = {
-        villages: Array.isArray(fsData.villages) && fsData.villages.length > 0 ? fsData.villages : (dbData.villages || disk.villages),
-        events: Array.isArray(fsData.events) && fsData.events.length > 0 ? fsData.events : (dbData.events || disk.events),
-        teams: Array.isArray(fsData.teams) && fsData.teams.length > 0 ? fsData.teams : (dbData.teams || disk.teams),
-        homePoster: fsData.homePoster ? { ...disk.homePoster, ...dbData.homePoster, ...fsData.homePoster } : (dbData.homePoster || disk.homePoster),
-        donationInfo: fsData.donationInfo ? { ...disk.donationInfo, ...dbData.donationInfo, ...fsData.donationInfo } : (dbData.donationInfo || disk.donationInfo),
-      };
-      writeMinistryLedger(dbData);
-    } catch {
+    const shouldSyncFirestore =
+      req.query.refresh === '1' || Date.now() - lastMinistryFirestoreSyncAt > FIRESTORE_SYNC_TTL_MS;
+
+    if (shouldSyncFirestore) {
+      lastMinistryFirestoreSyncAt = Date.now();
+      try {
+        const fsData = await loadFirestoreData();
+        dbData = {
+          villages: Array.isArray(fsData.villages) && fsData.villages.length > 0 ? fsData.villages : (dbData.villages || disk.villages),
+          events: Array.isArray(fsData.events) && fsData.events.length > 0 ? fsData.events : (dbData.events || disk.events),
+          teams: Array.isArray(fsData.teams) && fsData.teams.length > 0 ? fsData.teams : (dbData.teams || disk.teams),
+          homePoster: sanitizeHomePosterAssets(
+            fsData.homePoster ? { ...disk.homePoster, ...dbData.homePoster, ...fsData.homePoster } : (dbData.homePoster || disk.homePoster),
+            disk.homePoster
+          ),
+          donationInfo: fsData.donationInfo ? { ...disk.donationInfo, ...dbData.donationInfo, ...fsData.donationInfo } : (dbData.donationInfo || disk.donationInfo),
+        };
+        writeMinistryLedger(dbData);
+      } catch {
+        dbData = {
+          villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
+          events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
+          teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
+          homePoster: sanitizeHomePosterAssets(dbData.homePoster || disk.homePoster, disk.homePoster),
+          donationInfo: dbData.donationInfo || disk.donationInfo,
+        };
+      }
+    } else {
       dbData = {
         villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
         events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
         teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
-        homePoster: dbData.homePoster || disk.homePoster,
+        homePoster: sanitizeHomePosterAssets(dbData.homePoster || disk.homePoster, disk.homePoster),
         donationInfo: dbData.donationInfo || disk.donationInfo,
       };
     }
@@ -625,6 +732,9 @@ app.get('/api/ministry-data', async (req, res) => {
 
 // Finance Ledger Disk & Firestore Persistence Helpers
 const financeLedgerPath = path.join(process.cwd(), 'data', 'finance_ledger.json');
+const srcFinanceQrDefaultsPath = path.join(process.cwd(), 'src', 'data', 'financeQrDefaults.json');
+const dataFinanceQrDefaultsPath = path.join(process.cwd(), 'data', 'finance_qr_defaults.json');
+const srcFinanceDefaultsTsPath = path.join(process.cwd(), 'src', 'data', 'financeDefaults.ts');
 
 function readFinanceLedger(): {
   financeSettings: { emergencyReservePercent: number };
@@ -644,10 +754,9 @@ function readFinanceLedger(): {
       const financeSettings = parsed.financeSettings || initialDefaultFinanceData.financeSettings;
       let qrMembers = Array.isArray(parsed.qrMembers) && parsed.qrMembers.length > 0 ? parsed.qrMembers : [];
       if (qrMembers.length === 0) {
-        const defaultsPath = path.join(process.cwd(), 'data', 'finance_qr_defaults.json');
-        if (fs.existsSync(defaultsPath)) {
+        if (fs.existsSync(dataFinanceQrDefaultsPath)) {
           try {
-            qrMembers = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
+            qrMembers = JSON.parse(fs.readFileSync(dataFinanceQrDefaultsPath, 'utf8'));
           } catch {}
         }
       }
@@ -663,9 +772,8 @@ function readFinanceLedger(): {
   }
   let fallbackQr: any[] = [];
   try {
-    const defaultsPath = path.join(process.cwd(), 'data', 'finance_qr_defaults.json');
-    if (fs.existsSync(defaultsPath)) {
-      fallbackQr = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
+    if (fs.existsSync(dataFinanceQrDefaultsPath)) {
+      fallbackQr = JSON.parse(fs.readFileSync(dataFinanceQrDefaultsPath, 'utf8'));
     }
   } catch {}
   return {
@@ -683,56 +791,80 @@ function writeFinanceLedger(data: {
   qrMembers?: any[];
 }) {
   try {
+    const cleanData = processBase64ImagesInObject(data);
     const dir = path.dirname(financeLedgerPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(financeLedgerPath, JSON.stringify(data, null, 2), 'utf8');
+    fs.writeFileSync(financeLedgerPath, JSON.stringify(cleanData, null, 2), 'utf8');
+
+    // Mirror QR members and finance records to src/data/* so live builds always match Studio preview
+    if (Array.isArray(cleanData.qrMembers) && cleanData.qrMembers.length > 0) {
+      const qrSerialized = JSON.stringify(cleanData.qrMembers, null, 2);
+      try {
+        fs.writeFileSync(dataFinanceQrDefaultsPath, qrSerialized, 'utf8');
+        if (fs.existsSync(path.dirname(srcFinanceQrDefaultsPath))) {
+          fs.writeFileSync(srcFinanceQrDefaultsPath, qrSerialized, 'utf8');
+        }
+      } catch {}
+    }
+    try {
+      if (fs.existsSync(path.dirname(srcFinanceDefaultsTsPath))) {
+        const tsContent = `import { DonationTransaction, TeamDistribution } from '../types';\n\nexport const initialDefaultFinanceData: {\n  donations: DonationTransaction[];\n  distributions: TeamDistribution[];\n  financeSettings: { emergencyReservePercent: number };\n} = {\n  financeSettings: ${JSON.stringify(cleanData.financeSettings || { emergencyReservePercent: 20 }, null, 2)},\n  donations: ${JSON.stringify(cleanData.donations || [], null, 2)},\n  distributions: ${JSON.stringify(cleanData.distributions || [], null, 2)},\n};\n`;
+        fs.writeFileSync(srcFinanceDefaultsTsPath, tsContent, 'utf8');
+      }
+    } catch {}
   } catch (err) {
     console.error('Error writing finance_ledger.json:', err);
   }
 }
 
 // 1.1 Finance Data API (Instant offline & server sync with Firestore persistence)
-app.get('/api/finance-data', async (_req, res) => {
+app.get('/api/finance-data', async (req, res) => {
   try {
     const ledger = readFinanceLedger();
-    try {
-      const [donSnap, distSnap] = await Promise.all([
-        getDocs(collection(db, 'donations_ledger')),
-        getDocs(collection(db, 'team_distributions')),
-      ]);
-      let changed = false;
-      const donMap = new Map<string, any>();
-      for (const item of ledger.donations) {
-        if (item && item.id) donMap.set(item.id, item);
-      }
-      donSnap.forEach((d) => {
-        const data = { id: d.id, ...d.data() };
-        if (!donMap.has(d.id)) changed = true;
-        donMap.set(d.id, { ...(donMap.get(d.id) || {}), ...data });
-      });
-      ledger.donations = Array.from(donMap.values()).sort((a, b) =>
-        String(b.createdAt || b.date || '').localeCompare(String(a.createdAt || a.date || ''))
-      );
+    const shouldSyncFirestore =
+      req.query.refresh === '1' || Date.now() - lastFinanceFirestoreSyncAt > FIRESTORE_SYNC_TTL_MS;
 
-      const distMap = new Map<string, any>();
-      for (const item of ledger.distributions) {
-        if (item && item.id) distMap.set(item.id, item);
-      }
-      distSnap.forEach((d) => {
-        const data = { id: d.id, ...d.data() };
-        if (!distMap.has(d.id)) changed = true;
-        distMap.set(d.id, { ...(distMap.get(d.id) || {}), ...data });
-      });
-      ledger.distributions = Array.from(distMap.values()).sort((a, b) =>
-        String(b.createdAt || b.transferDate || '').localeCompare(
-          String(a.createdAt || a.transferDate || '')
-        )
-      );
+    if (shouldSyncFirestore) {
+      lastFinanceFirestoreSyncAt = Date.now();
+      try {
+        const [donSnap, distSnap] = await Promise.all([
+          getDocs(collection(db, 'donations_ledger')),
+          getDocs(collection(db, 'team_distributions')),
+        ]);
+        let changed = false;
+        const donMap = new Map<string, any>();
+        for (const item of ledger.donations) {
+          if (item && item.id) donMap.set(item.id, item);
+        }
+        donSnap.forEach((d) => {
+          const data = { id: d.id, ...d.data() };
+          if (!donMap.has(d.id)) changed = true;
+          donMap.set(d.id, { ...(donMap.get(d.id) || {}), ...data });
+        });
+        ledger.donations = Array.from(donMap.values()).sort((a, b) =>
+          String(b.createdAt || b.date || '').localeCompare(String(a.createdAt || a.date || ''))
+        );
 
-      if (changed) {
-        writeFinanceLedger(ledger);
-      }
-    } catch {}
+        const distMap = new Map<string, any>();
+        for (const item of ledger.distributions) {
+          if (item && item.id) distMap.set(item.id, item);
+        }
+        distSnap.forEach((d) => {
+          const data = { id: d.id, ...d.data() };
+          if (!distMap.has(d.id)) changed = true;
+          distMap.set(d.id, { ...(distMap.get(d.id) || {}), ...data });
+        });
+        ledger.distributions = Array.from(distMap.values()).sort((a, b) =>
+          String(b.createdAt || b.transferDate || '').localeCompare(
+            String(a.createdAt || a.transferDate || '')
+          )
+        );
+
+        if (changed) {
+          writeFinanceLedger(ledger);
+        }
+      } catch {}
+    }
 
     res.json({
       success: true,
