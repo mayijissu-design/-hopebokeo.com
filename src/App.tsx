@@ -28,6 +28,8 @@ import {
   saveHomePosterToFirestore,
   saveDonationInfoToFirestore,
   saveGlobalSettingsToFirestore,
+  isFirestoreReadQuotaExceeded,
+  markFirestoreQuotaExceeded,
   initialDefaultData,
 } from './lib/firestore-service';
 import initialDefaultDonationBankAccounts from './data/donationBankAccounts.json';
@@ -52,6 +54,16 @@ function isValidQrUrl(url?: string): boolean {
     trimmed.startsWith('https://') ||
     trimmed.startsWith('blob:')
   );
+}
+
+function shouldAcceptRemoteUpdate(remoteUpdatedAt?: string, localUpdatedAt?: string): boolean {
+  if (!localUpdatedAt) return true;
+  if (!remoteUpdatedAt) return false;
+  const rTime = Date.parse(remoteUpdatedAt);
+  const lTime = Date.parse(localUpdatedAt);
+  if (isNaN(rTime)) return false;
+  if (isNaN(lTime)) return true;
+  return rTime >= lTime;
 }
 
 function safeCacheEvents(events: EventData[]) {
@@ -571,67 +583,138 @@ export default function App() {
     donationInfo: false,
   });
 
-  // Fetch Ministry Data directly from Cloud Firestore (works on Netlify static site & Cloud Run)
+  // Fetch Ministry Data from Server API (/api/ministry-data) and Cloud Firestore with timestamp-aware merging
   const fetchMinistryData = useCallback(async () => {
     setIsLoading(true);
-    try {
-      const fsData = await loadFirestoreData();
-      if (fsData) {
-        if (Array.isArray(fsData.villages) && fsData.villages.length > 0 && !hasFirestoreSnapshotRef.current.villages) {
-          const cleanVillages = sanitizeClientVillages(fsData.villages);
-          setVillages(cleanVillages);
-          try {
-            localStorage.setItem('hb_cached_villages', JSON.stringify(cleanVillages));
-          } catch {}
-        }
+    let serverResponded = false;
 
-        if (Array.isArray(fsData.events) && fsData.events.length > 0 && !hasFirestoreSnapshotRef.current.events) {
-          setEvents(fsData.events);
-          try {
-            safeCacheEvents(fsData.events);
-          } catch {}
-        }
+    const applyIncomingData = (sourceData: any, isFromServerApi: boolean) => {
+      if (!sourceData) return;
 
-        if (Array.isArray(fsData.teams) && fsData.teams.length > 0 && !hasFirestoreSnapshotRef.current.teams) {
-          setTeams(fsData.teams);
-          try {
-            localStorage.setItem('hb_cached_teams', JSON.stringify(fsData.teams));
-          } catch {}
-        }
+      if (Array.isArray(sourceData.villages) && sourceData.villages.length > 0) {
+        const cleanVillages = sanitizeClientVillages(sourceData.villages);
+        setVillages(cleanVillages);
+        try {
+          localStorage.setItem('hb_cached_villages', JSON.stringify(cleanVillages));
+        } catch {}
+      }
 
-        if (fsData.homePoster && !hasFirestoreSnapshotRef.current.homePoster) {
-          const merged = sanitizeClientHomePoster(fsData.homePoster as HomePoster);
-          if (merged) {
-            setHomePoster(merged);
+      if (Array.isArray(sourceData.events) && sourceData.events.length > 0) {
+        setEvents(sourceData.events);
+        try {
+          safeCacheEvents(sourceData.events);
+        } catch {}
+      }
+
+      if (Array.isArray(sourceData.teams) && sourceData.teams.length > 0) {
+        setTeams(sourceData.teams);
+        try {
+          localStorage.setItem('hb_cached_teams', JSON.stringify(sourceData.teams));
+        } catch {}
+      }
+
+      if (sourceData.homePoster) {
+        let localPoster: HomePoster | undefined;
+        try {
+          const rawCached = localStorage.getItem('hb_cached_home_poster');
+          if (rawCached) localPoster = JSON.parse(rawCached);
+        } catch {}
+
+        const remotePoster = sanitizeClientHomePoster(sourceData.homePoster as HomePoster);
+        if (remotePoster) {
+          if (shouldAcceptRemoteUpdate(remotePoster.updatedAt, localPoster?.updatedAt)) {
+            setHomePoster(remotePoster);
             try {
-              localStorage.setItem('hb_cached_home_poster', JSON.stringify(merged));
-              if (merged.logoUrl) {
-                localStorage.setItem('hb_custom_logo', merged.logoUrl);
-                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: merged.logoUrl }));
+              localStorage.setItem('hb_cached_home_poster', JSON.stringify(remotePoster));
+              if (remotePoster.logoUrl) {
+                localStorage.setItem('hb_custom_logo', remotePoster.logoUrl);
+                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: remotePoster.logoUrl }));
               }
             } catch {}
+          } else if (isFromServerApi && localPoster) {
+            // Local browser has newer unsynced changes — push them to server so all other visitors get them
+            fetch('/api/save-home-poster', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ homePoster: localPoster }),
+            }).catch(() => {});
           }
         }
+      }
 
-        if (fsData.donationInfo && !hasFirestoreSnapshotRef.current.donationInfo) {
-          const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
-          const accounts = (fsData.donationInfo.bankAccounts && fsData.donationInfo.bankAccounts.length > 0)
-            ? fsData.donationInfo.bankAccounts.map((acc: any, idx: number) => {
+      if (sourceData.donationInfo) {
+        let localDonation: DonationInfo | undefined;
+        try {
+          const rawCached = localStorage.getItem('hb_cached_donation_info');
+          if (rawCached) localDonation = JSON.parse(rawCached);
+        } catch {}
+
+        const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
+        const accounts =
+          sourceData.donationInfo.bankAccounts && sourceData.donationInfo.bankAccounts.length > 0
+            ? sourceData.donationInfo.bankAccounts.map((acc: any, idx: number) => {
                 const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
                 const hasValidQr = isValidQrUrl(acc.qrImageUrl);
                 return {
                   ...acc,
-                  qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+                  qrImageUrl: hasValidQr ? acc.qrImageUrl : def?.qrImageUrl || acc.qrImageUrl || '',
                 };
               })
             : defaults;
-          const cleanDonationInfo = { ...fsData.donationInfo, bankAccounts: accounts };
+        const cleanDonationInfo: DonationInfo = { ...sourceData.donationInfo, bankAccounts: accounts };
+
+        if (shouldAcceptRemoteUpdate(cleanDonationInfo.updatedAt, localDonation?.updatedAt)) {
           setDonationInfo(cleanDonationInfo);
-          try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(cleanDonationInfo)); } catch {}
+          try {
+            localStorage.setItem('hb_cached_donation_info', JSON.stringify(cleanDonationInfo));
+          } catch {}
+        } else if (isFromServerApi && localDonation) {
+          fetch('/api/save-donation-info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(localDonation),
+          }).catch(() => {});
+        }
+      }
+
+      if (sourceData.globalSettings) {
+        const g = sourceData.globalSettings;
+        if (typeof g.autoThemeEnabled === 'boolean') setAutoThemeEnabled(g.autoThemeEnabled);
+        if (typeof g.autoThemeStart === 'string' && g.autoThemeStart) setAutoThemeStart(g.autoThemeStart);
+        if (typeof g.autoThemeEnd === 'string' && g.autoThemeEnd) setAutoThemeEnd(g.autoThemeEnd);
+        if (typeof g.logoUrl === 'string' && g.logoUrl) {
+          try {
+            localStorage.setItem('hb_custom_logo', g.logoUrl);
+            window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: g.logoUrl }));
+          } catch {}
+        }
+      }
+    };
+
+    try {
+      // 1. Primary sync via server ledger API (/api/ministry-data)
+      try {
+        const res = await fetch(`/api/ministry-data?t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const apiData = await res.json();
+          if (apiData && apiData.success) {
+            serverResponded = true;
+            applyIncomingData(apiData, true);
+          }
+        }
+      } catch {
+        // Server API not reachable (e.g., pure static hosting) — fall back to Firestore below
+      }
+
+      // 2. Fallback / supplement via Cloud Firestore if read quota is available
+      if (!serverResponded && !isFirestoreReadQuotaExceeded()) {
+        const fsData = await loadFirestoreData();
+        if (fsData && fsData.fromFirestore) {
+          applyIncomingData(fsData, false);
         }
       }
     } catch (err) {
-      console.warn('Firestore direct fetch skipped, using real-time sync listeners.');
+      console.warn('Ministry data sync notice:', err);
     } finally {
       setIsLoading(false);
     }
@@ -640,30 +723,49 @@ export default function App() {
   const handleSaveHomePoster = async (poster: HomePoster) => {
     try {
       setIsSyncing(true);
-      setHomePoster(poster);
+      const stampedPoster: HomePoster = {
+        ...poster,
+        updatedAt: new Date().toISOString(),
+      };
+      setHomePoster(stampedPoster);
       try {
-        localStorage.setItem('hb_cached_home_poster', JSON.stringify(poster));
-        if (poster.logoUrl) {
-          localStorage.setItem('hb_custom_logo', poster.logoUrl);
-          window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: poster.logoUrl }));
-        } else if (poster.logoUrl === '') {
+        localStorage.setItem('hb_cached_home_poster', JSON.stringify(stampedPoster));
+        if (stampedPoster.logoUrl) {
+          localStorage.setItem('hb_custom_logo', stampedPoster.logoUrl);
+          window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: stampedPoster.logoUrl }));
+        } else if (stampedPoster.logoUrl === '') {
           localStorage.removeItem('hb_custom_logo');
           window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: '/hb-logo.svg' }));
         }
       } catch {}
       triggerSyncIndicator();
 
-      const fsPromise = saveHomePosterToFirestore(poster).catch((e) =>
-        console.warn('Client firestore saveHomePoster notice:', e)
-      );
-
       const apiPromise = fetch('/api/save-home-poster', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ homePoster: poster }),
-      }).catch(() => {});
+        body: JSON.stringify({ homePoster: stampedPoster }),
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.homePoster) {
+              const cleanServerPoster = sanitizeClientHomePoster(data.homePoster);
+              if (cleanServerPoster) {
+                setHomePoster(cleanServerPoster);
+                try {
+                  localStorage.setItem('hb_cached_home_poster', JSON.stringify(cleanServerPoster));
+                } catch {}
+              }
+            }
+          }
+        })
+        .catch(() => {});
 
-      await Promise.allSettled([fsPromise, apiPromise]);
+      const fsPromise = saveHomePosterToFirestore(stampedPoster).catch((e) =>
+        console.warn('Client firestore saveHomePoster notice:', e)
+      );
+
+      await Promise.allSettled([apiPromise, fsPromise]);
     } catch (err) {
       setIsSyncing(false);
       console.error('Save poster error:', err);
@@ -674,17 +776,35 @@ export default function App() {
   const handleSaveDonationInfo = async (info: DonationInfo) => {
     try {
       setIsSyncing(true);
-      setDonationInfo(info);
-      try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(info)); } catch {}
+      const stampedInfo: DonationInfo = {
+        ...info,
+        updatedAt: new Date().toISOString(),
+      };
+      setDonationInfo(stampedInfo);
+      try {
+        localStorage.setItem('hb_cached_donation_info', JSON.stringify(stampedInfo));
+      } catch {}
       triggerSyncIndicator();
 
       const apiPromise = fetch('/api/save-donation-info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(info),
-      }).catch(() => {});
+        body: JSON.stringify(stampedInfo),
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.donationInfo) {
+              setDonationInfo(data.donationInfo);
+              try {
+                localStorage.setItem('hb_cached_donation_info', JSON.stringify(data.donationInfo));
+              } catch {}
+            }
+          }
+        })
+        .catch(() => {});
 
-      const fsPromise = saveDonationInfoToFirestore(info).catch((e) =>
+      const fsPromise = saveDonationInfoToFirestore(stampedInfo).catch((e) =>
         console.warn('Client firestore saveDonationInfo notice:', e)
       );
 
@@ -717,134 +837,223 @@ export default function App() {
     }, 1200);
   };
 
-  // Real-time multi-user Firestore listener subscription
+  // Real-time multi-user synchronization (Server-Sent Events + Periodic Poll + Cloud Firestore)
   useEffect(() => {
     fetchMinistryData();
 
-    let unsubVillages: () => void;
-    let unsubEvents: () => void;
-    let unsubTeams: () => void;
-    let unsubHomePoster: () => void;
-    let unsubDonation: () => void;
-    let unsubGlobalSettings: () => void;
-
+    // 1. Server-Sent Events (SSE) stream for instant cross-browser/cross-device real-time updates
+    let eventSource: EventSource | null = null;
     try {
-      unsubVillages = onSnapshot(collection(db, 'villages'), (snapshot) => {
-        if (!snapshot.empty) {
-          hasFirestoreSnapshotRef.current.villages = true;
-          const rawList = snapshot.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }));
-          const list = sanitizeClientVillages(rawList);
-          setVillages(list);
-          try { localStorage.setItem('hb_cached_villages', JSON.stringify(list)); } catch {}
-          setIsLoading(false);
-        }
-      }, (err) => {
-        console.warn('Villages sync notice (offline or reconnecting):', err?.message || err);
-      });
+      eventSource = new EventSource('/api/realtime-stream');
+      eventSource.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (!msg || msg.type !== 'update') return;
 
-      unsubEvents = onSnapshot(collection(db, 'events'), (snapshot) => {
-        if (!snapshot.empty) {
-          hasFirestoreSnapshotRef.current.events = true;
-          const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as EventData));
-          setEvents(list);
-          try { safeCacheEvents(list); } catch {}
-        }
-      }, (err) => {
-        console.warn('Events sync notice (offline or reconnecting):', err?.message || err);
-      });
-
-      unsubTeams = onSnapshot(collection(db, 'teams'), (snapshot) => {
-        if (!snapshot.empty) {
-          hasFirestoreSnapshotRef.current.teams = true;
-          const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as TeamMember));
-          setTeams(list);
-          try { localStorage.setItem('hb_cached_teams', JSON.stringify(list)); } catch {}
-        }
-      }, (err) => {
-        console.warn('Teams sync notice (offline or reconnecting):', err?.message || err);
-      });
-
-      unsubHomePoster = onSnapshot(doc(db, 'app_config', 'homePoster'), (snapshot) => {
-        if (snapshot.exists()) {
-          hasFirestoreSnapshotRef.current.homePoster = true;
-          const data = sanitizeClientHomePoster(snapshot.data() as HomePoster);
-          if (data) {
-            setHomePoster(data);
+          if (msg.section === 'homePoster' && msg.payload) {
+            const cleanPoster = sanitizeClientHomePoster(msg.payload as HomePoster);
+            if (cleanPoster) {
+              setHomePoster(cleanPoster);
+              try {
+                localStorage.setItem('hb_cached_home_poster', JSON.stringify(cleanPoster));
+                if (cleanPoster.logoUrl) {
+                  localStorage.setItem('hb_custom_logo', cleanPoster.logoUrl);
+                  window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: cleanPoster.logoUrl }));
+                }
+              } catch {}
+            }
+          } else if (msg.section === 'donationInfo' && msg.payload) {
+            setDonationInfo(msg.payload);
             try {
-              localStorage.setItem('hb_cached_home_poster', JSON.stringify(data));
-              if (data.logoUrl) {
-                localStorage.setItem('hb_custom_logo', data.logoUrl);
-                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: data.logoUrl }));
-              } else if (data.logoUrl === '') {
-                localStorage.removeItem('hb_custom_logo');
-                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: '/hb-logo.svg' }));
+              localStorage.setItem('hb_cached_donation_info', JSON.stringify(msg.payload));
+            } catch {}
+          } else if (msg.section === 'villages' && Array.isArray(msg.payload)) {
+            const cleanVillages = sanitizeClientVillages(msg.payload);
+            setVillages(cleanVillages);
+            try {
+              localStorage.setItem('hb_cached_villages', JSON.stringify(cleanVillages));
+            } catch {}
+          } else if (msg.section === 'events' && Array.isArray(msg.payload)) {
+            setEvents(msg.payload);
+            try {
+              safeCacheEvents(msg.payload);
+            } catch {}
+          } else if (msg.section === 'teams' && Array.isArray(msg.payload)) {
+            setTeams(msg.payload);
+            try {
+              localStorage.setItem('hb_cached_teams', JSON.stringify(msg.payload));
+            } catch {}
+          } else if (msg.section === 'globalSettings' && msg.payload) {
+            const g = msg.payload;
+            if (typeof g.autoThemeEnabled === 'boolean') setAutoThemeEnabled(g.autoThemeEnabled);
+            if (typeof g.autoThemeStart === 'string' && g.autoThemeStart) setAutoThemeStart(g.autoThemeStart);
+            if (typeof g.autoThemeEnd === 'string' && g.autoThemeEnd) setAutoThemeEnd(g.autoThemeEnd);
+            if (typeof g.logoUrl === 'string' && g.logoUrl) {
+              try {
+                localStorage.setItem('hb_custom_logo', g.logoUrl);
+                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: g.logoUrl }));
+              } catch {}
+            }
+          }
+        } catch {}
+      };
+    } catch {}
+
+    // 2. Background sync when tab regains visibility or every 8 seconds
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchMinistryData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const syncInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchMinistryData();
+      }
+    }, 8000);
+
+    // 3. Cloud Firestore real-time listeners (when read quota is available)
+    let unsubVillages: (() => void) | undefined;
+    let unsubEvents: (() => void) | undefined;
+    let unsubTeams: (() => void) | undefined;
+    let unsubHomePoster: (() => void) | undefined;
+    let unsubDonation: (() => void) | undefined;
+    let unsubGlobalSettings: (() => void) | undefined;
+
+    const cleanupFirestoreListeners = () => {
+      if (unsubVillages) { unsubVillages(); unsubVillages = undefined; }
+      if (unsubEvents) { unsubEvents(); unsubEvents = undefined; }
+      if (unsubTeams) { unsubTeams(); unsubTeams = undefined; }
+      if (unsubHomePoster) { unsubHomePoster(); unsubHomePoster = undefined; }
+      if (unsubDonation) { unsubDonation(); unsubDonation = undefined; }
+      if (unsubGlobalSettings) { unsubGlobalSettings(); unsubGlobalSettings = undefined; }
+    };
+
+    const handleSnapshotError = (err: any) => {
+      if (markFirestoreQuotaExceeded(err)) {
+        cleanupFirestoreListeners();
+      }
+    };
+
+    if (!isFirestoreReadQuotaExceeded()) {
+      try {
+        unsubVillages = onSnapshot(collection(db, 'villages'), (snapshot) => {
+          if (!snapshot.empty) {
+            hasFirestoreSnapshotRef.current.villages = true;
+            const rawList = snapshot.docs.map((d) => ({
+              id: d.id,
+              ...d.data(),
+            }));
+            const list = sanitizeClientVillages(rawList);
+            setVillages(list);
+            try { localStorage.setItem('hb_cached_villages', JSON.stringify(list)); } catch {}
+            setIsLoading(false);
+          }
+        }, handleSnapshotError);
+
+        unsubEvents = onSnapshot(collection(db, 'events'), (snapshot) => {
+          if (!snapshot.empty) {
+            hasFirestoreSnapshotRef.current.events = true;
+            const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as EventData));
+            setEvents(list);
+            try { safeCacheEvents(list); } catch {}
+          }
+        }, handleSnapshotError);
+
+        unsubTeams = onSnapshot(collection(db, 'teams'), (snapshot) => {
+          if (!snapshot.empty) {
+            hasFirestoreSnapshotRef.current.teams = true;
+            const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as TeamMember));
+            setTeams(list);
+            try { localStorage.setItem('hb_cached_teams', JSON.stringify(list)); } catch {}
+          }
+        }, handleSnapshotError);
+
+        unsubHomePoster = onSnapshot(doc(db, 'app_config', 'homePoster'), (snapshot) => {
+          if (snapshot.exists()) {
+            hasFirestoreSnapshotRef.current.homePoster = true;
+            const data = sanitizeClientHomePoster(snapshot.data() as HomePoster);
+            if (data) {
+              let localPoster: HomePoster | undefined;
+              try {
+                const raw = localStorage.getItem('hb_cached_home_poster');
+                if (raw) localPoster = JSON.parse(raw);
+              } catch {}
+              if (shouldAcceptRemoteUpdate(data.updatedAt, localPoster?.updatedAt)) {
+                setHomePoster(data);
+                try {
+                  localStorage.setItem('hb_cached_home_poster', JSON.stringify(data));
+                  if (data.logoUrl) {
+                    localStorage.setItem('hb_custom_logo', data.logoUrl);
+                    window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: data.logoUrl }));
+                  } else if (data.logoUrl === '') {
+                    localStorage.removeItem('hb_custom_logo');
+                    window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: '/hb-logo.svg' }));
+                  }
+                } catch {}
               }
-            } catch {}
+            }
           }
-        }
-      }, (err) => {
-        console.warn('Home poster sync notice (offline or reconnecting):', err?.message || err);
-      });
+        }, handleSnapshotError);
 
-      unsubDonation = onSnapshot(doc(db, 'app_config', 'donationInfo'), (snapshot) => {
-        if (snapshot.exists()) {
-          hasFirestoreSnapshotRef.current.donationInfo = true;
-          const data = snapshot.data() as DonationInfo;
-          const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
-          const accounts = (data.bankAccounts && data.bankAccounts.length > 0)
-            ? data.bankAccounts.map((acc: any, idx: number) => {
-                const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
-                const hasValidQr = isValidQrUrl(acc.qrImageUrl);
-                return {
-                  ...acc,
-                  qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
-                };
-              })
-            : defaults;
-          const cleanDonation = { ...data, bankAccounts: accounts };
-          setDonationInfo(cleanDonation);
-          try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(cleanDonation)); } catch {}
-        }
-      }, (err) => {
-        console.warn('Donation info sync notice (offline or reconnecting):', err?.message || err);
-      });
-
-      unsubGlobalSettings = onSnapshot(doc(db, 'app_config', 'globalSettings'), (snapshot) => {
-        if (snapshot.exists()) {
-          const g = snapshot.data();
-          if (typeof g.autoThemeEnabled === 'boolean') {
-            setAutoThemeEnabled(g.autoThemeEnabled);
-          }
-          if (typeof g.autoThemeStart === 'string' && g.autoThemeStart) {
-            setAutoThemeStart(g.autoThemeStart);
-          }
-          if (typeof g.autoThemeEnd === 'string' && g.autoThemeEnd) {
-            setAutoThemeEnd(g.autoThemeEnd);
-          }
-          if (typeof g.logoUrl === 'string' && g.logoUrl) {
+        unsubDonation = onSnapshot(doc(db, 'app_config', 'donationInfo'), (snapshot) => {
+          if (snapshot.exists()) {
+            hasFirestoreSnapshotRef.current.donationInfo = true;
+            const data = snapshot.data() as DonationInfo;
+            const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
+            const accounts = (data.bankAccounts && data.bankAccounts.length > 0)
+              ? data.bankAccounts.map((acc: any, idx: number) => {
+                  const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+                  const hasValidQr = isValidQrUrl(acc.qrImageUrl);
+                  return {
+                    ...acc,
+                    qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+                  };
+                })
+              : defaults;
+            const cleanDonation = { ...data, bankAccounts: accounts };
+            let localDon: DonationInfo | undefined;
             try {
-              localStorage.setItem('hb_custom_logo', g.logoUrl);
-              window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: g.logoUrl }));
+              const raw = localStorage.getItem('hb_cached_donation_info');
+              if (raw) localDon = JSON.parse(raw);
             } catch {}
+            if (shouldAcceptRemoteUpdate(cleanDonation.updatedAt, localDon?.updatedAt)) {
+              setDonationInfo(cleanDonation);
+              try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(cleanDonation)); } catch {}
+            }
           }
-        }
-      }, (err) => {
-        console.warn('Global settings sync notice:', err?.message || err);
-      });
-    } catch (err) {
-      console.warn('Realtime subscription notice:', err);
+        }, handleSnapshotError);
+
+        unsubGlobalSettings = onSnapshot(doc(db, 'app_config', 'globalSettings'), (snapshot) => {
+          if (snapshot.exists()) {
+            const g = snapshot.data();
+            if (typeof g.autoThemeEnabled === 'boolean') {
+              setAutoThemeEnabled(g.autoThemeEnabled);
+            }
+            if (typeof g.autoThemeStart === 'string' && g.autoThemeStart) {
+              setAutoThemeStart(g.autoThemeStart);
+            }
+            if (typeof g.autoThemeEnd === 'string' && g.autoThemeEnd) {
+              setAutoThemeEnd(g.autoThemeEnd);
+            }
+            if (typeof g.logoUrl === 'string' && g.logoUrl) {
+              try {
+                localStorage.setItem('hb_custom_logo', g.logoUrl);
+                window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: g.logoUrl }));
+              } catch {}
+            }
+          }
+        }, handleSnapshotError);
+      } catch (err) {
+        console.warn('Realtime subscription notice:', err);
+      }
     }
 
     return () => {
-      if (unsubVillages) unsubVillages();
-      if (unsubEvents) unsubEvents();
-      if (unsubTeams) unsubTeams();
-      if (unsubHomePoster) unsubHomePoster();
-      if (unsubDonation) unsubDonation();
-      if (unsubGlobalSettings) unsubGlobalSettings();
+      if (eventSource) eventSource.close();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(syncInterval);
+      cleanupFirestoreListeners();
     };
   }, [fetchMinistryData]);
 

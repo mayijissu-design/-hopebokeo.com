@@ -15,6 +15,9 @@ import {
   deleteTeamFromFirestore,
   saveHomePosterToFirestore,
   saveDonationInfoToFirestore,
+  saveGlobalSettingsToFirestore,
+  isFirestoreReadQuotaExceeded,
+  markFirestoreQuotaExceeded,
   initialDefaultData,
 } from './src/lib/firestore-service';
 import { initialDefaultFinanceData } from './src/data/financeDefaults';
@@ -61,6 +64,67 @@ app.get(['/health', '/api/health', '/_healthz', '/_ah/health'], (_req, res) => {
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Allow cross-origin requests so any browser or static host can sync with the API
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cache-Control');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+// Real-time Server-Sent Events (SSE) hub to broadcast settings & data changes to all open browsers/devices immediately
+const sseClients = new Set<express.Response>();
+
+function broadcastRealtimeUpdate(section: string, payload?: any) {
+  const eventStr = `data: ${JSON.stringify({
+    type: 'update',
+    section,
+    payload,
+    timestamp: new Date().toISOString(),
+  })}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(eventStr);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+app.get('/api/realtime-stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  res.write(
+    `data: ${JSON.stringify({
+      type: 'connected',
+      timestamp: new Date().toISOString(),
+    })}\n\n`
+  );
+
+  sseClients.add(res);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
+  });
+});
 
 // Static uploads directory with fallback for read-only container file systems
 let uploadsDir = path.join(process.cwd(), 'public', 'uploads');
@@ -138,60 +202,62 @@ app.get('/uploads/:filename', async (req, res, next) => {
       return res.sendFile(publicPath);
     }
 
-    // Check Cloud Firestore uploaded_files
-    try {
-      const docId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const fileDoc = await getDoc(doc(db, 'uploaded_files', docId));
-      if (fileDoc.exists()) {
-        const fileData = fileDoc.data();
-        if (fileData?.isChunked && fileData.totalChunks) {
-          // Reconstruct from chunks
-          const chunksList: string[] = [];
-          for (let i = 0; i < fileData.totalChunks; i++) {
-            const chkDoc = await getDoc(doc(db, 'uploaded_file_chunks', `${docId}_chk_${i}`));
-            if (chkDoc.exists()) {
-              chunksList.push(chkDoc.data()?.chunk || '');
+    // Check Cloud Firestore uploaded_files (skip if read quota is currently exceeded)
+    if (!isFirestoreReadQuotaExceeded()) {
+      try {
+        const docId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const fileDoc = await getDoc(doc(db, 'uploaded_files', docId));
+        if (fileDoc.exists()) {
+          const fileData = fileDoc.data();
+          if (fileData?.isChunked && fileData.totalChunks) {
+            // Reconstruct from chunks
+            const chunksList: string[] = [];
+            for (let i = 0; i < fileData.totalChunks; i++) {
+              const chkDoc = await getDoc(doc(db, 'uploaded_file_chunks', `${docId}_chk_${i}`));
+              if (chkDoc.exists()) {
+                chunksList.push(chkDoc.data()?.chunk || '');
+              }
             }
-          }
-          const fullBase64 = chunksList.join('');
-          if (fullBase64) {
-            const buf = Buffer.from(fullBase64, 'base64');
+            const fullBase64 = chunksList.join('');
+            if (fullBase64) {
+              const buf = Buffer.from(fullBase64, 'base64');
+              try {
+                fs.writeFileSync(publicPath, buf);
+              } catch {}
+              res.setHeader('Content-Type', fileData.mimeType || 'application/octet-stream');
+              return res.send(buf);
+            }
+          } else if (fileData?.data && typeof fileData.data === 'string') {
+            const buf = Buffer.from(fileData.data, 'base64');
             try {
               fs.writeFileSync(publicPath, buf);
             } catch {}
             res.setHeader('Content-Type', fileData.mimeType || 'application/octet-stream');
             return res.send(buf);
           }
-        } else if (fileData?.data && typeof fileData.data === 'string') {
-          const buf = Buffer.from(fileData.data, 'base64');
-          try {
-            fs.writeFileSync(publicPath, buf);
-          } catch {}
-          res.setHeader('Content-Type', fileData.mimeType || 'application/octet-stream');
-          return res.send(buf);
         }
+      } catch (err) {
+        markFirestoreQuotaExceeded(err);
       }
-    } catch {
-      // Gracefully fall back to local disk and default assets
-    }
 
-    if (filename.toLowerCase().endsWith('.pdf')) {
-      // Check Firestore uploaded_files for any valid non-empty PDF
-      try {
-        const snap = await getDocs(collection(db, 'uploaded_files'));
-        for (const d of snap.docs) {
-          const dData = d.data();
-          if (dData.filename?.toLowerCase().endsWith('.pdf') && dData.size > 2000 && dData.data) {
-            const buf = Buffer.from(dData.data, 'base64');
-            try {
-              fs.writeFileSync(publicPath, buf);
-            } catch {}
-            res.setHeader('Content-Type', 'application/pdf');
-            return res.send(buf);
+      if (filename.toLowerCase().endsWith('.pdf')) {
+        // Check Firestore uploaded_files for any valid non-empty PDF
+        try {
+          const snap = await getDocs(collection(db, 'uploaded_files'));
+          for (const d of snap.docs) {
+            const dData = d.data();
+            if (dData.filename?.toLowerCase().endsWith('.pdf') && dData.size > 2000 && dData.data) {
+              const buf = Buffer.from(dData.data, 'base64');
+              try {
+                fs.writeFileSync(publicPath, buf);
+              } catch {}
+              res.setHeader('Content-Type', 'application/pdf');
+              return res.send(buf);
+            }
           }
+        } catch (e) {
+          markFirestoreQuotaExceeded(e);
         }
-      } catch (e) {
-        console.warn('Firestore PDF resolution notice:', e);
       }
     }
 
@@ -572,12 +638,25 @@ function sanitizeHomePosterAssets(poster: any, fallbackPoster: any): any {
   return merged;
 }
 
+const srcDonationBankAccountsPath = path.join(process.cwd(), 'src', 'data', 'donationBankAccounts.json');
+
+function isNewerTimestamp(incoming?: string, existing?: string): boolean {
+  if (!existing) return true;
+  if (!incoming) return false;
+  const incTime = Date.parse(incoming);
+  const exTime = Date.parse(existing);
+  if (isNaN(incTime)) return false;
+  if (isNaN(exTime)) return true;
+  return incTime >= exTime;
+}
+
 function readMinistryLedger(): {
   villages: Village[];
   events: EventData[];
   teams: TeamMember[];
   homePoster: any;
   donationInfo: any;
+  globalSettings?: any;
 } {
   try {
     if (fs.existsSync(ministryLedgerPath)) {
@@ -589,6 +668,7 @@ function readMinistryLedger(): {
         teams: Array.isArray(parsed.teams) && parsed.teams.length > 0 ? parsed.teams : (initialDefaultData.teams as any),
         homePoster: sanitizeHomePosterAssets(parsed.homePoster, initialDefaultData.homePoster),
         donationInfo: parsed.donationInfo ? { ...initialDefaultData.donationInfo, ...parsed.donationInfo } : initialDefaultData.donationInfo,
+        globalSettings: parsed.globalSettings || undefined,
       };
     }
   } catch (err) {
@@ -603,6 +683,7 @@ function writeMinistryLedger(data: {
   teams: TeamMember[];
   homePoster: any;
   donationInfo: any;
+  globalSettings?: any;
 }) {
   try {
     const cleanData = processBase64ImagesInObject({
@@ -621,6 +702,13 @@ function writeMinistryLedger(data: {
       if (fs.existsSync(srcDir)) {
         fs.writeFileSync(srcMinistryDefaultsPath, serialized, 'utf8');
       }
+      if (Array.isArray(cleanData.donationInfo?.bankAccounts) && cleanData.donationInfo.bankAccounts.length > 0) {
+        fs.writeFileSync(
+          srcDonationBankAccountsPath,
+          JSON.stringify(cleanData.donationInfo.bankAccounts, null, 2),
+          'utf8'
+        );
+      }
     } catch {}
   } catch (err) {
     console.error('Error writing ministry_ledger.json:', err);
@@ -634,69 +722,125 @@ let dbData: {
   teams: TeamMember[];
   homePoster: any;
   donationInfo: any;
+  globalSettings?: any;
 } = readMinistryLedger();
 
 let lastMinistryFirestoreSyncAt = 0;
 let lastFinanceFirestoreSyncAt = 0;
-const FIRESTORE_SYNC_TTL_MS = 5 * 1000; // 5 seconds TTL so server always reflects fresh Firestore updates
+const FIRESTORE_SYNC_TTL_MS = 60 * 1000; // 60 seconds TTL to conserve Firestore free-tier read quota
 
-// Load live data from Firestore on server startup (merging with disk ledger)
+// Load live data from Firestore on server startup (merging with disk ledger only if Firestore actually returned newer data)
 loadFirestoreData().then((data) => {
   lastMinistryFirestoreSyncAt = Date.now();
   const disk = readMinistryLedger();
+  let updatedFromCloud = false;
+
+  const nextVillages = Array.isArray(data.villages) && data.villages.length > 0 ? data.villages : disk.villages;
+  const nextEvents = Array.isArray(data.events) && data.events.length > 0 ? data.events : disk.events;
+  const nextTeams = Array.isArray(data.teams) && data.teams.length > 0 ? data.teams : disk.teams;
+
+  let nextHomePoster = disk.homePoster;
+  if (data.homePoster && isNewerTimestamp(data.homePoster.updatedAt, disk.homePoster?.updatedAt)) {
+    nextHomePoster = sanitizeHomePosterAssets({ ...disk.homePoster, ...data.homePoster }, disk.homePoster);
+    updatedFromCloud = true;
+  }
+
+  let nextDonationInfo = disk.donationInfo;
+  if (data.donationInfo && isNewerTimestamp(data.donationInfo.updatedAt, disk.donationInfo?.updatedAt)) {
+    nextDonationInfo = { ...disk.donationInfo, ...data.donationInfo };
+    updatedFromCloud = true;
+  }
+
+  let nextGlobalSettings = disk.globalSettings;
+  if (data.globalSettings && isNewerTimestamp(data.globalSettings.updatedAt, disk.globalSettings?.updatedAt)) {
+    nextGlobalSettings = { ...(disk.globalSettings || {}), ...data.globalSettings };
+    updatedFromCloud = true;
+  }
+
   dbData = {
-    villages: Array.isArray(data.villages) && data.villages.length > 0 ? data.villages : disk.villages,
-    events: Array.isArray(data.events) && data.events.length > 0 ? data.events : disk.events,
-    teams: Array.isArray(data.teams) && data.teams.length > 0 ? data.teams : disk.teams,
-    homePoster: sanitizeHomePosterAssets(data.homePoster || disk.homePoster, disk.homePoster),
-    donationInfo: data.donationInfo || disk.donationInfo,
+    villages: nextVillages,
+    events: nextEvents,
+    teams: nextTeams,
+    homePoster: nextHomePoster,
+    donationInfo: nextDonationInfo,
+    globalSettings: nextGlobalSettings,
   };
-  writeMinistryLedger(dbData);
-  console.log(`Cloud Firestore Database connected! Loaded ${dbData.villages.length} villages, ${dbData.events.length} events, ${dbData.teams.length} teams.`);
+
+  if (data.fromFirestore && updatedFromCloud) {
+    writeMinistryLedger(dbData);
+  }
+  console.log(`Ministry Ledger ready: ${dbData.villages.length} villages, ${dbData.events.length} events, ${dbData.teams.length} teams.`);
 }).catch((err) => {
   lastMinistryFirestoreSyncAt = Date.now();
-  console.error('Initial Firestore loading error:', err);
+  console.warn('Initial Firestore loading notice:', err?.message || err);
 });
 
-// 1. Get Ministry Data (Villages, Events, Teams) - Always synced with Cloud Firestore & Disk Ledger
+// 1. Get Ministry Data (Villages, Events, Teams, Poster, Donation, Global Settings)
 app.get('/api/ministry-data', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
     const disk = readMinistryLedger();
     const shouldSyncFirestore =
-      req.query.refresh === '1' || Date.now() - lastMinistryFirestoreSyncAt > FIRESTORE_SYNC_TTL_MS;
+      !isFirestoreReadQuotaExceeded() &&
+      (req.query.refresh === '1' || Date.now() - lastMinistryFirestoreSyncAt > FIRESTORE_SYNC_TTL_MS);
+
+    // Ensure dbData has the latest between memory and disk first
+    const baseHomePoster = isNewerTimestamp(dbData.homePoster?.updatedAt, disk.homePoster?.updatedAt)
+      ? dbData.homePoster
+      : disk.homePoster;
+    const baseDonationInfo = isNewerTimestamp(dbData.donationInfo?.updatedAt, disk.donationInfo?.updatedAt)
+      ? dbData.donationInfo
+      : disk.donationInfo;
+    const baseGlobalSettings = isNewerTimestamp(dbData.globalSettings?.updatedAt, disk.globalSettings?.updatedAt)
+      ? dbData.globalSettings
+      : disk.globalSettings;
+
+    dbData = {
+      villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
+      events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
+      teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
+      homePoster: sanitizeHomePosterAssets(baseHomePoster, disk.homePoster),
+      donationInfo: baseDonationInfo || disk.donationInfo,
+      globalSettings: baseGlobalSettings,
+    };
 
     if (shouldSyncFirestore) {
       lastMinistryFirestoreSyncAt = Date.now();
       try {
         const fsData = await loadFirestoreData();
-        dbData = {
-          villages: Array.isArray(fsData.villages) && fsData.villages.length > 0 ? fsData.villages : (dbData.villages || disk.villages),
-          events: Array.isArray(fsData.events) && fsData.events.length > 0 ? fsData.events : (dbData.events || disk.events),
-          teams: Array.isArray(fsData.teams) && fsData.teams.length > 0 ? fsData.teams : (dbData.teams || disk.teams),
-          homePoster: sanitizeHomePosterAssets(
-            fsData.homePoster ? { ...disk.homePoster, ...dbData.homePoster, ...fsData.homePoster } : (dbData.homePoster || disk.homePoster),
-            disk.homePoster
-          ),
-          donationInfo: fsData.donationInfo ? { ...disk.donationInfo, ...dbData.donationInfo, ...fsData.donationInfo } : (dbData.donationInfo || disk.donationInfo),
-        };
-        writeMinistryLedger(dbData);
-      } catch {
-        dbData = {
-          villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
-          events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
-          teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
-          homePoster: sanitizeHomePosterAssets(dbData.homePoster || disk.homePoster, disk.homePoster),
-          donationInfo: dbData.donationInfo || disk.donationInfo,
-        };
+        if (fsData.fromFirestore) {
+          let changed = false;
+          if (Array.isArray(fsData.villages) && fsData.villages.length > 0) {
+            dbData.villages = fsData.villages;
+          }
+          if (Array.isArray(fsData.events) && fsData.events.length > 0) {
+            dbData.events = fsData.events;
+          }
+          if (Array.isArray(fsData.teams) && fsData.teams.length > 0) {
+            dbData.teams = fsData.teams;
+          }
+          if (fsData.homePoster && isNewerTimestamp(fsData.homePoster.updatedAt, dbData.homePoster?.updatedAt)) {
+            dbData.homePoster = sanitizeHomePosterAssets(
+              { ...dbData.homePoster, ...fsData.homePoster },
+              dbData.homePoster
+            );
+            changed = true;
+          }
+          if (fsData.donationInfo && isNewerTimestamp(fsData.donationInfo.updatedAt, dbData.donationInfo?.updatedAt)) {
+            dbData.donationInfo = { ...dbData.donationInfo, ...fsData.donationInfo };
+            changed = true;
+          }
+          if (fsData.globalSettings && isNewerTimestamp(fsData.globalSettings.updatedAt, dbData.globalSettings?.updatedAt)) {
+            dbData.globalSettings = { ...(dbData.globalSettings || {}), ...fsData.globalSettings };
+            changed = true;
+          }
+          if (changed) {
+            writeMinistryLedger(dbData);
+          }
+        }
+      } catch (err) {
+        markFirestoreQuotaExceeded(err);
       }
-    } else {
-      dbData = {
-        villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
-        events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
-        teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
-        homePoster: sanitizeHomePosterAssets(dbData.homePoster || disk.homePoster, disk.homePoster),
-        donationInfo: dbData.donationInfo || disk.donationInfo,
-      };
     }
 
     const finLedger = readFinanceLedger();
@@ -707,6 +851,7 @@ app.get('/api/ministry-data', async (req, res) => {
       teams: dbData.teams,
       homePoster: dbData.homePoster,
       donationInfo: dbData.donationInfo,
+      globalSettings: dbData.globalSettings,
       financeSettings: finLedger.financeSettings,
       donations: finLedger.donations,
       distributions: finLedger.distributions,
@@ -721,6 +866,7 @@ app.get('/api/ministry-data', async (req, res) => {
       teams: dbData.teams,
       homePoster: dbData.homePoster,
       donationInfo: dbData.donationInfo,
+      globalSettings: dbData.globalSettings,
       financeSettings: finLedger.financeSettings,
       donations: finLedger.donations,
       distributions: finLedger.distributions,
@@ -820,7 +966,8 @@ app.get('/api/finance-data', async (req, res) => {
   try {
     const ledger = readFinanceLedger();
     const shouldSyncFirestore =
-      req.query.refresh === '1' || Date.now() - lastFinanceFirestoreSyncAt > FIRESTORE_SYNC_TTL_MS;
+      !isFirestoreReadQuotaExceeded() &&
+      (req.query.refresh === '1' || Date.now() - lastFinanceFirestoreSyncAt > FIRESTORE_SYNC_TTL_MS);
 
     if (shouldSyncFirestore) {
       lastFinanceFirestoreSyncAt = Date.now();
@@ -861,7 +1008,9 @@ app.get('/api/finance-data', async (req, res) => {
         if (changed) {
           writeFinanceLedger(ledger);
         }
-      } catch {}
+      } catch (err) {
+        markFirestoreQuotaExceeded(err);
+      }
     }
 
     res.json({
@@ -1060,8 +1209,10 @@ app.post('/api/delete-finance-qr-member', async (req, res) => {
 
 // Save Donation & Prayer Info
 app.post('/api/save-donation-info', async (req, res) => {
-  const dData = req.body;
+  let dData = req.body || {};
   try {
+    dData = processBase64ImagesInObject(dData, 'donation_qr');
+    const nowIso = new Date().toISOString();
     dbData.donationInfo = {
       ...dbData.donationInfo,
       ...dData,
@@ -1091,8 +1242,10 @@ app.post('/api/save-donation-info', async (req, res) => {
       hidden: dData.hidden !== undefined ? dData.hidden : (dData.hideDonationSection !== undefined ? dData.hideDonationSection : dbData.donationInfo.hidden),
       hideDonationSection: dData.hideDonationSection !== undefined ? dData.hideDonationSection : (dData.hidden !== undefined ? dData.hidden : dbData.donationInfo.hideDonationSection),
       hideVisionMission: dData.hideVisionMission !== undefined ? dData.hideVisionMission : dbData.donationInfo.hideVisionMission,
+      updatedAt: dData.updatedAt || nowIso,
     };
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('donationInfo', dbData.donationInfo);
     saveDonationInfoToFirestore(dbData.donationInfo).catch((e) => console.warn('Firestore saveDonationInfo notice:', e?.message || e));
     res.json({ success: true, donationInfo: dbData.donationInfo });
   } catch (err: any) {
@@ -1100,12 +1253,39 @@ app.post('/api/save-donation-info', async (req, res) => {
   }
 });
 
+// Save Global Settings (autoThemeEnabled, autoThemeStart, autoThemeEnd, logoUrl, etc.)
+app.post('/api/save-global-settings', async (req, res) => {
+  let gData = req.body || {};
+  try {
+    gData = processBase64ImagesInObject(gData, 'global_setting');
+    const nowIso = new Date().toISOString();
+    dbData.globalSettings = {
+      ...(dbData.globalSettings || {}),
+      ...gData,
+      updatedAt: gData.updatedAt || nowIso,
+    };
+    if (typeof gData.logoUrl === 'string' && dbData.homePoster) {
+      dbData.homePoster = {
+        ...dbData.homePoster,
+        logoUrl: gData.logoUrl,
+        updatedAt: nowIso,
+      };
+    }
+    writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('globalSettings', dbData.globalSettings);
+    setDoc(doc(db, 'app_config', 'globalSettings'), dbData.globalSettings, { merge: true }).catch(() => {});
+    res.json({ success: true, globalSettings: dbData.globalSettings });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.toString() });
+  }
+});
+
 // Save Home Poster / Banner
 app.post('/api/save-home-poster', async (req, res) => {
-  const body = req.body;
+  const body = req.body || {};
   let pData = body.homePoster || body;
   try {
-    pData = processBase64ImagesInObject(pData);
+    pData = processBase64ImagesInObject(pData, 'poster_img');
     const rawImgs = Array.isArray(pData.imageUrls) ? pData.imageUrls : (pData.imageUrl ? [pData.imageUrl] : []);
     const cleanImgs: string[] = [];
     const seen = new Set<string>();
@@ -1119,6 +1299,7 @@ app.post('/api/save-home-poster', async (req, res) => {
       }
     }
 
+    const nowIso = new Date().toISOString();
     dbData.homePoster = {
       ...dbData.homePoster,
       ...pData,
@@ -1139,8 +1320,10 @@ app.post('/api/save-home-poster', async (req, res) => {
       hidden: pData.hidden !== undefined ? pData.hidden : (pData.hidePoster !== undefined ? pData.hidePoster : dbData.homePoster.hidden),
       hidePoster: pData.hidePoster !== undefined ? pData.hidePoster : (pData.hidden !== undefined ? pData.hidden : dbData.homePoster.hidePoster),
       hideBokeoSection: pData.hideBokeoSection !== undefined ? pData.hideBokeoSection : dbData.homePoster.hideBokeoSection,
+      updatedAt: pData.updatedAt || nowIso,
     };
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('homePoster', dbData.homePoster);
     await saveHomePosterToFirestore(dbData.homePoster).catch((e) => console.warn('Firestore saveHomePoster notice:', e?.message || e));
     res.json({ success: true, homePoster: dbData.homePoster });
   } catch (err: any) {
@@ -1221,6 +1404,7 @@ app.post('/api/save-village', async (req, res) => {
     }
 
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('villages', dbData.villages);
     saveVillageToFirestore(newVillage).catch((e) => console.warn('Firestore saveVillage notice:', e?.message || e));
 
     res.json({ success: true, village: newVillage });
@@ -1235,6 +1419,7 @@ app.post('/api/delete-village', async (req, res) => {
   try {
     dbData.villages = dbData.villages.filter((v) => v.rowId !== Number(rowId));
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('villages', dbData.villages);
     deleteVillageFromFirestore(Number(rowId), id).catch((e) => console.warn('Firestore deleteVillage notice:', e?.message || e));
     res.json({ success: true });
   } catch (err: any) {
@@ -1353,6 +1538,7 @@ app.post('/api/save-event', async (req, res) => {
     }
 
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('events', dbData.events);
     saveEventToFirestore(newEvent).catch((e) => console.warn('Firestore saveEvent notice:', e?.message || e));
 
     res.json({ success: true, event: newEvent });
@@ -1369,6 +1555,7 @@ app.post('/api/delete-event', async (req, res) => {
       (e) => (rowId && e.rowId !== Number(rowId)) && (!id || e.id !== id)
     );
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('events', dbData.events);
     deleteEventFromFirestore(Number(rowId), id).catch((e) => console.warn('Firestore deleteEvent notice:', e?.message || e));
     res.json({ success: true });
   } catch (err: any) {
@@ -1414,6 +1601,7 @@ app.post('/api/save-team', async (req, res) => {
     }
 
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('teams', dbData.teams);
     saveTeamToFirestore(newTeam).catch((e) => console.warn('Firestore saveTeam notice:', e?.message || e));
 
     res.json({ success: true, team: newTeam });
@@ -1428,6 +1616,7 @@ app.post('/api/delete-team', async (req, res) => {
   try {
     dbData.teams = dbData.teams.filter((t) => t.rowId !== Number(rowId));
     writeMinistryLedger(dbData);
+    broadcastRealtimeUpdate('teams', dbData.teams);
     deleteTeamFromFirestore(Number(rowId)).catch((e) => console.warn('Firestore deleteTeam notice:', e?.message || e));
     res.json({ success: true });
   } catch (err: any) {

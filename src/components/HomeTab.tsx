@@ -664,15 +664,10 @@ export const HomeTab: React.FC<HomeTabProps> = ({
     if (list.length === 0 && homePoster?.imageUrl?.trim()) {
       list.push(homePoster.imageUrl.trim());
     }
-    // If empty or only single default image, provide curated rotating banners so the poster always auto-rotates
+    // If empty, provide curated rotating banners so the poster always has a valid visual
     if (list.length === 0) {
       list.push(
         '/uploads/home_poster_banner.jpg',
-        '/uploads/5b593987-79b3-4309-ac43-e717cbc3c838_1788761424505_430.jpg',
-        '/uploads/551239041_802528468839951_42532514368066_1788761477530_359.jpg'
-      );
-    } else if (list.length === 1 && list[0] === '/uploads/home_poster_banner.jpg') {
-      list.push(
         '/uploads/5b593987-79b3-4309-ac43-e717cbc3c838_1788761424505_430.jpg',
         '/uploads/551239041_802528468839951_42532514368066_1788761477530_359.jpg'
       );

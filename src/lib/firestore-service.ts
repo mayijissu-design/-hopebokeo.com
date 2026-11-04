@@ -44,32 +44,59 @@ export const initialDefaultData = {
   },
 };
 
-export async function loadFirestoreData() {
+let firestoreReadCooldownUntil = 0;
+
+export function isFirestoreReadQuotaExceeded(): boolean {
+  return Date.now() < firestoreReadCooldownUntil;
+}
+
+export function markFirestoreQuotaExceeded(err: any) {
+  const msg = String(err?.message || err?.code || err || '');
+  if (
+    msg.includes('resource-exhausted') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Quota exceeded')
+  ) {
+    firestoreReadCooldownUntil = Date.now() + 3 * 60 * 1000;
+  }
+}
+
+export async function loadFirestoreData(): Promise<{
+  villages: any[] | null;
+  events: any[] | null;
+  teams: any[] | null;
+  homePoster: any | null;
+  donationInfo: any | null;
+  globalSettings: any | null;
+  fromFirestore: boolean;
+  quotaExceeded?: boolean;
+}> {
+  if (isFirestoreReadQuotaExceeded()) {
+    return {
+      villages: null,
+      events: null,
+      teams: null,
+      homePoster: null,
+      donationInfo: null,
+      globalSettings: null,
+      fromFirestore: false,
+      quotaExceeded: true,
+    };
+  }
+
   try {
     let villages: any[] = [];
     let events: any[] = [];
     let teams: any[] = [];
+    let loadedVillages = false;
+    let loadedEvents = false;
+    let loadedTeams = false;
 
     try {
       const villagesSnap = await getDocs(collection(db, VILLAGES_COL));
-      villages = villagesSnap.docs.map(d => {
-        const data = d.data();
-        return {
-          ...data,
-          id: d.id || data.id,
-          heard: Number(data.heard) || 0,
-          believers: Number(data.believers) || 0,
-          baptized: Number(data.baptized) || 0,
-          attending: typeof data.attending === 'number' ? data.attending : (Number(data.attending) || 0),
-          leaders: typeof data.leaders === 'number' ? Math.max(0, data.leaders) : Math.max(0, Number(data.leaders) || 0),
-        };
-      });
-    } catch (e: any) {
-      console.warn('Notice loading villages from Firestore (offline/cached):', e?.message || e);
-      try {
-        const { getDocsFromCache } = await import('firebase/firestore');
-        const cacheSnap = await getDocsFromCache(collection(db, VILLAGES_COL));
-        villages = cacheSnap.docs.map(d => {
+      if (!villagesSnap.empty) {
+        loadedVillages = true;
+        villages = villagesSnap.docs.map(d => {
           const data = d.data();
           return {
             ...data,
@@ -81,36 +108,46 @@ export async function loadFirestoreData() {
             leaders: typeof data.leaders === 'number' ? Math.max(0, data.leaders) : Math.max(0, Number(data.leaders) || 0),
           };
         });
-      } catch {}
+      }
+    } catch (e: any) {
+      markFirestoreQuotaExceeded(e);
+      if (isFirestoreReadQuotaExceeded()) {
+        return {
+          villages: null,
+          events: null,
+          teams: null,
+          homePoster: null,
+          donationInfo: null,
+          globalSettings: null,
+          fromFirestore: false,
+          quotaExceeded: true,
+        };
+      }
     }
 
     try {
       const eventsSnap = await getDocs(collection(db, EVENTS_COL));
-      events = eventsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!eventsSnap.empty) {
+        loadedEvents = true;
+        events = eventsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
     } catch (e: any) {
-      console.warn('Notice loading events from Firestore (offline/cached):', e?.message || e);
-      try {
-        const { getDocsFromCache } = await import('firebase/firestore');
-        const cacheSnap = await getDocsFromCache(collection(db, EVENTS_COL));
-        events = cacheSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      } catch {}
+      markFirestoreQuotaExceeded(e);
     }
 
     try {
       const teamsSnap = await getDocs(collection(db, TEAMS_COL));
-      teams = teamsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!teamsSnap.empty) {
+        loadedTeams = true;
+        teams = teamsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
     } catch (e: any) {
-      console.warn('Notice loading teams from Firestore (offline/cached):', e?.message || e);
-      try {
-        const { getDocsFromCache } = await import('firebase/firestore');
-        const cacheSnap = await getDocsFromCache(collection(db, TEAMS_COL));
-        teams = cacheSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      } catch {}
+      markFirestoreQuotaExceeded(e);
     }
 
     // Merge teams with default reference teams so QR codes and bank details are never lost
     const defTeamsMap = new Map((initialDefaultData.teams || []).map((t: any) => [t.name?.trim().toLowerCase(), t]));
-    if (teams.length > 0) {
+    if (loadedTeams && teams.length > 0) {
       teams = teams.map((t: any) => {
         const def = defTeamsMap.get(t.name?.trim().toLowerCase());
         if (def) {
@@ -126,54 +163,70 @@ export async function loadFirestoreData() {
         }
         return t;
       });
-      // Append any default members missing from Firestore
-      (initialDefaultData.teams || []).forEach((def: any) => {
-        const exists = teams.some((t: any) => t.name?.trim().toLowerCase() === def.name?.trim().toLowerCase());
-        if (!exists) teams.push({ ...def });
-      });
     }
 
-    // Fallback per collection individually so a quota/network failure on one collection never returns an empty array
-    if (villages.length === 0) {
-      villages = [...initialDefaultData.villages];
-    }
-    if (events.length === 0) {
-      events = [...initialDefaultData.events];
-    }
-    if (teams.length === 0) {
-      teams = [...initialDefaultData.teams];
-    }
-
-    let homePoster = initialDefaultData.homePoster;
-    try {
-      const homePosterDoc = await getDoc(doc(db, CONFIG_COL, 'homePoster'));
-      if (homePosterDoc.exists()) {
-        homePoster = { ...initialDefaultData.homePoster, ...homePosterDoc.data() };
+    let homePoster: any | null = null;
+    if (!isFirestoreReadQuotaExceeded()) {
+      try {
+        const homePosterDoc = await getDoc(doc(db, CONFIG_COL, 'homePoster'));
+        if (homePosterDoc.exists()) {
+          homePoster = { ...initialDefaultData.homePoster, ...homePosterDoc.data() };
+        }
+      } catch (e: any) {
+        markFirestoreQuotaExceeded(e);
       }
-    } catch (e: any) {
-      console.warn('Notice: homePoster doc not yet cached or offline, using default:', e?.message || e);
     }
 
-    let donationInfo = initialDefaultData.donationInfo;
-    try {
-      const donationDoc = await getDoc(doc(db, CONFIG_COL, 'donationInfo'));
-      if (donationDoc.exists()) {
-        donationInfo = { ...initialDefaultData.donationInfo, ...donationDoc.data() };
+    let donationInfo: any | null = null;
+    if (!isFirestoreReadQuotaExceeded()) {
+      try {
+        const donationDoc = await getDoc(doc(db, CONFIG_COL, 'donationInfo'));
+        if (donationDoc.exists()) {
+          donationInfo = { ...initialDefaultData.donationInfo, ...donationDoc.data() };
+        }
+      } catch (e: any) {
+        markFirestoreQuotaExceeded(e);
       }
-    } catch (e: any) {
-      console.warn('Notice: donationInfo doc not yet cached or offline, using default:', e?.message || e);
     }
+
+    let globalSettings: any | null = null;
+    if (!isFirestoreReadQuotaExceeded()) {
+      try {
+        const globalDoc = await getDoc(doc(db, CONFIG_COL, 'globalSettings'));
+        if (globalDoc.exists()) {
+          globalSettings = globalDoc.data();
+        }
+      } catch (e: any) {
+        markFirestoreQuotaExceeded(e);
+      }
+    }
+
+    const fromFirestore = Boolean(
+      loadedVillages || loadedEvents || loadedTeams || homePoster || donationInfo || globalSettings
+    );
 
     return {
-      villages: villages as any[],
-      events: events as any[],
-      teams: teams as any[],
+      villages: loadedVillages && villages.length > 0 ? villages : null,
+      events: loadedEvents && events.length > 0 ? events : null,
+      teams: loadedTeams && teams.length > 0 ? teams : null,
       homePoster,
-      donationInfo
+      donationInfo,
+      globalSettings,
+      fromFirestore,
+      quotaExceeded: isFirestoreReadQuotaExceeded(),
     };
   } catch (err: any) {
-    console.warn('Warning loading data from Firestore (gracefully using fallback):', err?.message || err);
-    return initialDefaultData;
+    markFirestoreQuotaExceeded(err);
+    return {
+      villages: null,
+      events: null,
+      teams: null,
+      homePoster: null,
+      donationInfo: null,
+      globalSettings: null,
+      fromFirestore: false,
+      quotaExceeded: isFirestoreReadQuotaExceeded(),
+    };
   }
 }
 
@@ -199,48 +252,46 @@ export async function saveVillageToFirestore(village: any) {
   const payload = {
     ...village,
     id: docId,
+    updatedAt: new Date().toISOString(),
     heard: Number(village.heard) || 0,
     believers: Number(village.believers) || 0,
     baptized: Number(village.baptized) || 0,
-    attending: typeof village.attending === 'number' ? village.attending : (Number(village.attending) || 0),
-    leaders: typeof village.leaders === 'number' ? village.leaders : (Number(village.leaders) || 0),
+    attending: typeof village.attending === 'number' ? dataNumOrZero(village.attending) : (Number(village.attending) || 0),
+    leaders: typeof village.leaders === 'number' ? dataNumOrZero(village.leaders) : (Number(village.leaders) || 0),
     hidden: Boolean(village.hidden),
     ...(finalLat !== undefined ? { lat: finalLat } : {}),
     ...(finalLng !== undefined ? { lng: finalLng } : {}),
   };
-  await setDoc(doc(db, VILLAGES_COL, docId), sanitizeForFirestore(payload));
-
-  // Clean up duplicate docs if id changed or rowId matches
-  try {
-    const snap = await getDocs(collection(db, VILLAGES_COL));
-    for (const d of snap.docs) {
-      if (d.id !== docId && d.data().rowId === village.rowId) {
-        await deleteDoc(doc(db, VILLAGES_COL, d.id)).catch(() => {});
-      }
-    }
-  } catch (e) {
-    console.warn('Cleanup duplicate villages warning:', e);
-  }
+  await setDoc(doc(db, VILLAGES_COL, docId), sanitizeForFirestore(payload), { merge: true });
 
   return payload;
+}
+
+function dataNumOrZero(v: any): number {
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
 }
 
 export async function deleteVillageFromFirestore(rowId: number, id?: string) {
   if (id) {
     await deleteDoc(doc(db, VILLAGES_COL, id));
-  } else {
-    const snap = await getDocs(collection(db, VILLAGES_COL));
-    for (const d of snap.docs) {
-      if (d.data().rowId === rowId) {
-        await deleteDoc(doc(db, VILLAGES_COL, d.id));
+  } else if (!isFirestoreReadQuotaExceeded()) {
+    try {
+      const snap = await getDocs(collection(db, VILLAGES_COL));
+      for (const d of snap.docs) {
+        if (d.data().rowId === rowId) {
+          await deleteDoc(doc(db, VILLAGES_COL, d.id));
+        }
       }
+    } catch (e) {
+      markFirestoreQuotaExceeded(e);
     }
   }
 }
 
 export async function saveEventToFirestore(event: any) {
   const docId = event.id || `e_${event.rowId || Date.now()}`;
-  let safeEvent = { ...event };
+  let safeEvent = { ...event, updatedAt: new Date().toISOString() };
 
   // Guard against Firestore 1MB document limit:
   // If docUrl or docUrls contain oversized base64 data URIs (>100KB), prevent Firestore rejection
@@ -308,36 +359,40 @@ export async function saveEventToFirestore(event: any) {
 export async function deleteEventFromFirestore(rowId: number, id?: string) {
   if (id) {
     await deleteDoc(doc(db, EVENTS_COL, id));
-  } else {
-    const snap = await getDocs(collection(db, EVENTS_COL));
-    for (const d of snap.docs) {
-      if (d.data().rowId === rowId) {
-        await deleteDoc(doc(db, EVENTS_COL, d.id));
+  } else if (!isFirestoreReadQuotaExceeded()) {
+    try {
+      const snap = await getDocs(collection(db, EVENTS_COL));
+      for (const d of snap.docs) {
+        if (d.data().rowId === rowId) {
+          await deleteDoc(doc(db, EVENTS_COL, d.id));
+        }
       }
+    } catch (e) {
+      markFirestoreQuotaExceeded(e);
     }
   }
 }
 
 export async function saveTeamToFirestore(team: any) {
   const docId = team.id || `t_${team.rowId || Date.now()}`;
-  
-  // Read existing doc to prevent updates from accidentally wiping out QR codes, images, or bank info
   let existingData: any = {};
-  try {
-    const snap = await getDoc(doc(db, TEAMS_COL, docId));
-    if (snap.exists()) {
-      existingData = snap.data() || {};
+  if (!isFirestoreReadQuotaExceeded()) {
+    try {
+      const snap = await getDoc(doc(db, TEAMS_COL, docId));
+      if (snap.exists()) {
+        existingData = snap.data() || {};
+      }
+    } catch (e) {
+      markFirestoreQuotaExceeded(e);
     }
-  } catch (e) {
-    // Ignore read errors
   }
 
   const teamPayload = {
     ...existingData,
     ...team,
     id: docId,
+    updatedAt: new Date().toISOString(),
     hidden: team.hidden !== undefined ? Boolean(team.hidden) : Boolean(existingData.hidden),
-    // Crucial safeguard: protect existing QR code, photo, and bank info from being replaced by empty strings
     financeQrUrl: (team.financeQrUrl && team.financeQrUrl.trim() !== '')
       ? team.financeQrUrl.trim()
       : (existingData.financeQrUrl || ''),
@@ -356,21 +411,6 @@ export async function saveTeamToFirestore(team: any) {
   };
 
   await setDoc(doc(db, TEAMS_COL, docId), sanitizeForFirestore(teamPayload), { merge: true });
-
-  // Clean up exact old doc ID if rowId was migrated
-  if (team.rowId) {
-    try {
-      const snap = await getDocs(collection(db, TEAMS_COL));
-      for (const d of snap.docs) {
-        if (d.id !== docId && d.data().rowId === team.rowId && d.id.startsWith('t_temp_')) {
-          await deleteDoc(doc(db, TEAMS_COL, d.id)).catch(() => {});
-        }
-      }
-    } catch (e) {
-      console.warn('Cleanup duplicate teams warning:', e);
-    }
-  }
-
   return teamPayload;
 }
 
@@ -378,16 +418,22 @@ export async function deleteTeamFromFirestore(rowId: number, id?: string) {
   if (id) {
     await deleteDoc(doc(db, TEAMS_COL, id)).catch(() => {});
   }
-  const snap = await getDocs(collection(db, TEAMS_COL));
-  for (const d of snap.docs) {
-    if (d.data().rowId === rowId || d.id === id || d.id === `t_${rowId}`) {
-      await deleteDoc(doc(db, TEAMS_COL, d.id)).catch(() => {});
+  if (!isFirestoreReadQuotaExceeded()) {
+    try {
+      const snap = await getDocs(collection(db, TEAMS_COL));
+      for (const d of snap.docs) {
+        if (d.data().rowId === rowId || d.id === id || d.id === `t_${rowId}`) {
+          await deleteDoc(doc(db, TEAMS_COL, d.id)).catch(() => {});
+        }
+      }
+    } catch (e) {
+      markFirestoreQuotaExceeded(e);
     }
   }
 }
 
 export async function saveHomePosterToFirestore(poster: any) {
-  let safePoster = { ...poster, updatedAt: new Date().toISOString() };
+  let safePoster = { ...poster, updatedAt: poster?.updatedAt || new Date().toISOString() };
   if (!safePoster?._isOptimized) {
     safePoster = await optimizePosterForFirestore(safePoster);
   }
@@ -402,7 +448,6 @@ export async function saveHomePosterToFirestore(poster: any) {
     await setDoc(doc(db, CONFIG_COL, 'homePoster'), sanitizeForFirestore(safePoster), { merge: true });
   } catch (err: any) {
     console.warn('Firestore setDoc initial attempt warning:', err);
-    // If size limit error occurred, run emergency compression and retry
     if (err?.message?.includes('exceeds the maximum allowed size') || err?.message?.includes('too large') || jsonSize > 850000) {
       console.warn('Retrying saveHomePoster with deep compression...');
       safePoster = await emergencyCompressObject(safePoster);
@@ -416,7 +461,7 @@ export async function saveHomePosterToFirestore(poster: any) {
 export async function saveDonationInfoToFirestore(info: any) {
   await setDoc(
     doc(db, CONFIG_COL, 'donationInfo'),
-    sanitizeForFirestore({ ...info, updatedAt: new Date().toISOString() }),
+    sanitizeForFirestore({ ...info, updatedAt: info?.updatedAt || new Date().toISOString() }),
     { merge: true }
   );
 }
@@ -428,10 +473,27 @@ export async function saveGlobalSettingsToFirestore(settings: {
   darkModeDefault?: boolean;
   logoUrl?: string;
 }) {
+  const stamped = { ...settings, updatedAt: new Date().toISOString() };
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const existing = localStorage.getItem('hb_cached_global_settings');
+      const merged = existing ? { ...JSON.parse(existing), ...stamped } : stamped;
+      localStorage.setItem('hb_cached_global_settings', JSON.stringify(merged));
+    }
+  } catch {}
+
+  if (typeof fetch !== 'undefined') {
+    fetch('/api/save-global-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stamped),
+    }).catch(() => {});
+  }
+
   try {
     await setDoc(
       doc(db, CONFIG_COL, 'globalSettings'),
-      sanitizeForFirestore({ ...settings, updatedAt: new Date().toISOString() }),
+      sanitizeForFirestore(stamped),
       { merge: true }
     );
   } catch (e) {
@@ -501,7 +563,7 @@ export async function loadFinanceData() {
   let fsDonations: any[] = [];
   let fsDistributions: any[] = [];
   let fsSettings: any = null;
-  try {
+  if (!isFirestoreReadQuotaExceeded()) {
     try {
       const donSnap = await getDocs(collection(db, DONATIONS_COL));
       fsDonations = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -511,20 +573,10 @@ export async function loadFinanceData() {
       if (settingsSnap.exists()) {
         fsSettings = settingsSnap.data();
       }
-    } catch {
-      try {
-        const { getDocsFromCache, getDocFromCache } = await import('firebase/firestore');
-        const donSnap = await getDocsFromCache(collection(db, DONATIONS_COL));
-        fsDonations = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        const distSnap = await getDocsFromCache(collection(db, DISTRIBUTIONS_COL));
-        fsDistributions = distSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        const settingsSnap = await getDocFromCache(doc(db, CONFIG_COL, 'financeSettings'));
-        if (settingsSnap.exists()) {
-          fsSettings = settingsSnap.data();
-        }
-      } catch {}
+    } catch (e: any) {
+      markFirestoreQuotaExceeded(e);
     }
-  } catch {}
+  }
 
   // Merge by ID (prioritizing live Firestore records over disk ledger)
   const mergeById = (primary: any[], secondary: any[]) => {
@@ -592,7 +644,7 @@ export async function saveFinanceSettingsToFirestore(settings: { emergencyReserv
   }).catch(() => {});
 
   try {
-    await setDoc(doc(db, CONFIG_COL, 'financeSettings'), sanitizeForFirestore(settings));
+    await setDoc(doc(db, CONFIG_COL, 'financeSettings'), sanitizeForFirestore(settings), { merge: true });
   } catch (e) {
     console.warn('Firestore setDoc notice for financeSettings:', e);
   }
@@ -623,7 +675,7 @@ export async function saveDonationTransactionToFirestore(item: any) {
 
   // 3. Persist to Firestore
   try {
-    await setDoc(doc(db, DONATIONS_COL, docId), sanitizeForFirestore(payload));
+    await setDoc(doc(db, DONATIONS_COL, docId), sanitizeForFirestore(payload), { merge: true });
   } catch (e) {
     console.warn('Firestore setDoc notice for donation transaction:', e);
   }
@@ -681,7 +733,7 @@ export async function saveTeamDistributionToFirestore(item: any) {
 
   // 3. Persist to Firestore
   try {
-    await setDoc(doc(db, DISTRIBUTIONS_COL, docId), sanitizeForFirestore(payload));
+    await setDoc(doc(db, DISTRIBUTIONS_COL, docId), sanitizeForFirestore(payload), { merge: true });
   } catch (e) {
     console.warn('Firestore setDoc notice for team distribution:', e);
   }
@@ -757,7 +809,6 @@ export async function loadFinanceQrMembers() {
     }
   } catch {}
 
-  // Helper to merge list with defaultList to never lose any QR image or bank info
   const mergeWithDefaults = (primaryList: any[]): any[] => {
     const map = new Map<string, any>();
     (defaultList || []).forEach((def: any) => {
@@ -783,32 +834,26 @@ export async function loadFinanceQrMembers() {
     return Array.from(map.values());
   };
 
-  // 1. Prioritize live Cloud Firestore first so changes sync globally across all visitors
-  try {
-    const snap = await getDocs(collection(db, FINANCE_QR_MEMBERS_COL));
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    if (list.length > 0) {
-      const merged = mergeWithDefaults(list);
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('hb_cached_qr_members', JSON.stringify(merged));
-        }
-      } catch {}
-      return merged;
-    }
-  } catch {
+  // 1. Prioritize live Cloud Firestore first when quota is available
+  if (!isFirestoreReadQuotaExceeded()) {
     try {
-      const { getDocsFromCache } = await import('firebase/firestore');
-      const snap = await getDocsFromCache(collection(db, FINANCE_QR_MEMBERS_COL));
+      const snap = await getDocs(collection(db, FINANCE_QR_MEMBERS_COL));
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       if (list.length > 0) {
         const merged = mergeWithDefaults(list);
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('hb_cached_qr_members', JSON.stringify(merged));
+          }
+        } catch {}
         return merged;
       }
-    } catch {}
+    } catch (e: any) {
+      markFirestoreQuotaExceeded(e);
+    }
   }
 
-  // 2. Fallback to server backend if Firestore collection was empty or offline
+  // 2. Fallback to server backend if Firestore collection was empty or quota exceeded
   try {
     const res = await fetch('/api/finance-qr-members');
     if (res.ok) {
@@ -831,8 +876,6 @@ export async function loadFinanceQrMembers() {
       localStorage.setItem('hb_cached_qr_members', JSON.stringify(finalResult));
     }
   } catch {}
-  // Silently seed Firestore with defaults in background
-  Promise.all(finalResult.map((m) => saveFinanceQrMemberToFirestore(m))).catch(() => {});
   return finalResult;
 }
 
@@ -840,17 +883,22 @@ export async function saveFinanceQrMemberToFirestore(item: any) {
   const docId = item.id || `fq_${Date.now()}`;
 
   let existingData: any = {};
-  try {
-    const snap = await getDoc(doc(db, FINANCE_QR_MEMBERS_COL, docId));
-    if (snap.exists()) {
-      existingData = snap.data() || {};
+  if (!isFirestoreReadQuotaExceeded()) {
+    try {
+      const snap = await getDoc(doc(db, FINANCE_QR_MEMBERS_COL, docId));
+      if (snap.exists()) {
+        existingData = snap.data() || {};
+      }
+    } catch (e: any) {
+      markFirestoreQuotaExceeded(e);
     }
-  } catch {}
+  }
 
   const payload = {
     ...existingData,
     ...item,
     id: docId,
+    updatedAt: new Date().toISOString(),
     financeQrUrl: (item.financeQrUrl && item.financeQrUrl.trim() !== '')
       ? item.financeQrUrl.trim()
       : (existingData.financeQrUrl || ''),

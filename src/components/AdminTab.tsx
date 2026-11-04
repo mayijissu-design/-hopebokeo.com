@@ -534,19 +534,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
   // Home Poster Edit Local State
   const [posterTitle, setPosterTitle] = useState<string>(
-    homePoster?.title && homePoster.title !== 'ປະກາດຂ່າວປະເສີດ ແລະ ສ້າງສາວົກ'
-      ? homePoster.title
-      : 'Hope is growing in Bokeo.'
+    homePoster?.title || 'Hope is growing in Bokeo.'
   );
   const [posterTitleEn, setPosterTitleEn] = useState<string>(
-    homePoster?.titleEn && homePoster.titleEn !== 'Proclaim Gospel & Disciple Nations'
-      ? homePoster.titleEn
-      : 'Hope is growing in Bokeo.'
+    homePoster?.titleEn || 'Hope is growing in Bokeo.'
   );
   const [posterTitleTh, setPosterTitleTh] = useState<string>(
-    homePoster?.titleTh && homePoster.titleTh !== 'ประกาศข่าวประเสริฐ และสร้างสาวก'
-      ? homePoster.titleTh
-      : 'Hope is growing in Bokeo.'
+    homePoster?.titleTh || 'Hope is growing in Bokeo.'
   );
   const [posterSubtitle, setPosterSubtitle] = useState<string>(homePoster?.subtitle || 'ແຂວງບໍ່ແກ້ວ (Bokeo Province)');
   const [posterSubtitleEn, setPosterSubtitleEn] = useState<string>(homePoster?.subtitleEn || 'Bokeo Province (Lao PDR)');
@@ -1028,14 +1022,14 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   useEffect(() => {
     if (homePoster) {
       isHydratingFromPropsRef.current = true;
-      if (homePoster.title) {
-        setPosterTitle(homePoster.title === 'ປະກາດຂ່າວປະເສີດ ແລະ ສ້າງສາວົກ' ? 'Hope is growing in Bokeo.' : homePoster.title);
+      if (homePoster.title !== undefined) {
+        setPosterTitle(homePoster.title);
       }
-      if (homePoster.titleEn) {
-        setPosterTitleEn(homePoster.titleEn === 'Proclaim Gospel & Disciple Nations' ? 'Hope is growing in Bokeo.' : homePoster.titleEn);
+      if (homePoster.titleEn !== undefined) {
+        setPosterTitleEn(homePoster.titleEn);
       }
-      if (homePoster.titleTh) {
-        setPosterTitleTh(homePoster.titleTh === 'ประกาศข่าวประเสริฐ และสร้างสาวก' ? 'Hope is growing in Bokeo.' : homePoster.titleTh);
+      if (homePoster.titleTh !== undefined) {
+        setPosterTitleTh(homePoster.titleTh);
       }
       if (homePoster.subtitle) setPosterSubtitle(homePoster.subtitle);
       if (homePoster.subtitleEn) setPosterSubtitleEn(homePoster.subtitleEn);
@@ -1181,6 +1175,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     }
   }, [homePoster]);
 
+  const adminSubTabRef = useRef(adminSubTab);
+  useEffect(() => {
+    adminSubTabRef.current = adminSubTab;
+  }, [adminSubTab]);
+
   // Debounced auto-sync to ensure any changes in About Poster sliders are immediately persisted to homePoster & localStorage
   const hasInitializedAboutPosterRef = useRef(false);
   useEffect(() => {
@@ -1188,9 +1187,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       hasInitializedAboutPosterRef.current = true;
       return;
     }
-    if (adminSubTab !== 'about_poster') return;
+    if (isHydratingFromPropsRef.current) return;
+    if (adminSubTabRef.current !== 'about_poster') return;
 
     const timer = setTimeout(() => {
+      if (isHydratingFromPropsRef.current) return;
       const draft: HomePoster = {
         title: homePoster?.title || 'HOPE BOKEO',
         subtitle: homePoster?.subtitle || '',
@@ -1224,6 +1225,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
         missionEn: donationMissionEn || '',
         missionTh: donationMissionTh || '',
         hideVisionMission: hideVisionMissionState,
+        updatedAt: new Date().toISOString(),
       };
 
       try {
@@ -1237,7 +1239,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
     return () => clearTimeout(timer);
   }, [
-    adminSubTab,
     bokeoPosterHeight,
     bokeoPosterOverlayOpacity,
     bokeoPosterEdgeFade,
@@ -1481,10 +1482,20 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   const [showFinanceCode, setShowFinanceCode] = useState<boolean>(false);
   const [financeCodeError, setFinanceCodeError] = useState<string>('');
 
-  // Real-time debounced auto-sync for Poster & Upcoming Event settings when unlocked in Admin Panel
+  const isSettingsUnlockedRef = useRef(isSettingsUnlocked);
   useEffect(() => {
-    if (!isSettingsUnlocked || isHydratingFromPropsRef.current) return;
-    if (adminSubTab !== 'poster' && adminSubTab !== 'upcoming') return;
+    isSettingsUnlockedRef.current = isSettingsUnlocked;
+  }, [isSettingsUnlocked]);
+
+  const hasInitializedPosterAutoSaveRef = useRef(false);
+  // Real-time debounced auto-sync for Poster & Upcoming Event settings when edited in Admin Panel
+  useEffect(() => {
+    if (!hasInitializedPosterAutoSaveRef.current) {
+      hasInitializedPosterAutoSaveRef.current = true;
+      return;
+    }
+    if (!isSettingsUnlockedRef.current || isHydratingFromPropsRef.current) return;
+    if (adminSubTabRef.current !== 'poster' && adminSubTabRef.current !== 'upcoming') return;
 
     const timer = setTimeout(() => {
       if (isHydratingFromPropsRef.current) return;
@@ -1580,6 +1591,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
         hidePoster: hidePosterSection,
         hideTextOverlay: !showTextOverlay,
         showTextOverlay: showTextOverlay,
+        updatedAt: new Date().toISOString(),
       };
 
       if (onSaveHomePoster) {
@@ -1589,8 +1601,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
     return () => clearTimeout(timer);
   }, [
-    isSettingsUnlocked,
-    adminSubTab,
     posterTitle,
     posterTitleEn,
     posterTitleTh,
@@ -1673,10 +1683,15 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     showTextOverlay,
   ]);
 
-  // Real-time debounced auto-sync for Donation & Prayer Channels when unlocked in Admin Panel
+  const hasInitializedDonationAutoSaveRef = useRef(false);
+  // Real-time debounced auto-sync for Donation & Prayer Channels when edited in Admin Panel
   useEffect(() => {
-    if (!isSettingsUnlocked || isHydratingFromPropsRef.current) return;
-    if (adminSubTab !== 'donation') return;
+    if (!hasInitializedDonationAutoSaveRef.current) {
+      hasInitializedDonationAutoSaveRef.current = true;
+      return;
+    }
+    if (!isSettingsUnlockedRef.current || isHydratingFromPropsRef.current) return;
+    if (adminSubTabRef.current !== 'donation') return;
 
     const timer = setTimeout(() => {
       if (isHydratingFromPropsRef.current) return;
@@ -1720,6 +1735,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
         hideDonationSection: Boolean(hideDonationSectionState),
         hideVisionMission: Boolean(hideVisionMissionState),
         hidePrayerLine: Boolean(hidePrayerLineState),
+        updatedAt: new Date().toISOString(),
       };
 
       if (onSaveDonationInfo) {
@@ -1729,8 +1745,6 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
     return () => clearTimeout(timer);
   }, [
-    isSettingsUnlocked,
-    adminSubTab,
     donationBankAccounts,
     donationBankName,
     donationAccountName,
