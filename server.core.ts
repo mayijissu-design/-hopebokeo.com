@@ -288,11 +288,11 @@ app.post('/api/upload-file', uploadHandler.single('file') as any, async (req, re
       const diskPath = path.join(uploadsDir, req.file.filename);
       if (fs.existsSync(diskPath)) {
         const buf = fs.readFileSync(diskPath);
-        persistUploadedFile(
+        await persistUploadedFile(
           req.file.filename,
           buf,
           req.file.mimetype || 'application/octet-stream'
-        ).catch((e) => console.warn('Async Firestore backup notice:', e));
+        );
       }
     } catch (e) {
       console.warn('Backup upload warn:', e);
@@ -570,17 +570,29 @@ loadFirestoreData().then((data) => {
   console.error('Initial Firestore loading error:', err);
 });
 
-// 1. Get Ministry Data (Villages, Events, Teams)
+// 1. Get Ministry Data (Villages, Events, Teams) - Always synced with Cloud Firestore
 app.get('/api/ministry-data', async (req, res) => {
   try {
     const disk = readMinistryLedger();
-    dbData = {
-      villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
-      events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
-      teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
-      homePoster: dbData.homePoster || disk.homePoster,
-      donationInfo: dbData.donationInfo || disk.donationInfo,
-    };
+    try {
+      const fsData = await loadFirestoreData();
+      dbData = {
+        villages: Array.isArray(fsData.villages) && fsData.villages.length > 0 ? fsData.villages : (dbData.villages || disk.villages),
+        events: Array.isArray(fsData.events) && fsData.events.length > 0 ? fsData.events : (dbData.events || disk.events),
+        teams: Array.isArray(fsData.teams) && fsData.teams.length > 0 ? fsData.teams : (dbData.teams || disk.teams),
+        homePoster: fsData.homePoster ? { ...disk.homePoster, ...dbData.homePoster, ...fsData.homePoster } : (dbData.homePoster || disk.homePoster),
+        donationInfo: fsData.donationInfo ? { ...disk.donationInfo, ...dbData.donationInfo, ...fsData.donationInfo } : (dbData.donationInfo || disk.donationInfo),
+      };
+      writeMinistryLedger(dbData);
+    } catch {
+      dbData = {
+        villages: Array.isArray(dbData.villages) && dbData.villages.length > 0 ? dbData.villages : disk.villages,
+        events: Array.isArray(dbData.events) && dbData.events.length > 0 ? dbData.events : disk.events,
+        teams: Array.isArray(dbData.teams) && dbData.teams.length > 0 ? dbData.teams : disk.teams,
+        homePoster: dbData.homePoster || disk.homePoster,
+        donationInfo: dbData.donationInfo || disk.donationInfo,
+      };
+    }
 
     const finLedger = readFinanceLedger();
     res.json({
@@ -999,7 +1011,7 @@ app.post('/api/save-home-poster', async (req, res) => {
       hideBokeoSection: pData.hideBokeoSection !== undefined ? pData.hideBokeoSection : dbData.homePoster.hideBokeoSection,
     };
     writeMinistryLedger(dbData);
-    saveHomePosterToFirestore(dbData.homePoster).catch((e) => console.warn('Firestore saveHomePoster notice:', e?.message || e));
+    await saveHomePosterToFirestore(dbData.homePoster).catch((e) => console.warn('Firestore saveHomePoster notice:', e?.message || e));
     res.json({ success: true, homePoster: dbData.homePoster });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.toString() });

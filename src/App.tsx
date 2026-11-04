@@ -29,6 +29,7 @@ import {
   initialDefaultData,
 } from './lib/firestore-service';
 import initialDefaultDonationBankAccounts from './data/donationBankAccounts.json';
+import { resolveUploadUrl, getCachedUploadUrl } from './utils/fileUploader';
 import {
   getInitialActiveTab,
   persistActiveTab,
@@ -38,6 +39,18 @@ import {
   getSavedTabScroll,
   restoreScrollPosition,
 } from './utils/navigationState';
+
+function isValidQrUrl(url?: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return (
+    trimmed.startsWith('data:image') ||
+    trimmed.startsWith('/uploads/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('blob:')
+  );
+}
 
 function safeCacheEvents(events: EventData[]) {
   try {
@@ -362,7 +375,7 @@ export default function App() {
           const accounts = (parsed.bankAccounts && parsed.bankAccounts.length > 0)
             ? parsed.bankAccounts.map((acc: any, idx: number) => {
                 const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
-                const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+                const hasValidQr = isValidQrUrl(acc.qrImageUrl);
                 return {
                   ...acc,
                   qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
@@ -378,7 +391,7 @@ export default function App() {
       const accounts = (fallback.bankAccounts && fallback.bankAccounts.length > 0)
         ? fallback.bankAccounts.map((acc: any, idx: number) => {
             const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
-            const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+            const hasValidQr = isValidQrUrl(acc.qrImageUrl);
             return {
               ...acc,
               qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
@@ -507,15 +520,24 @@ export default function App() {
           }
 
           if (data.homePoster) {
-            setHomePoster(data.homePoster);
-            try { localStorage.setItem('hb_cached_home_poster', JSON.stringify(data.homePoster)); } catch {}
+            setHomePoster((prev) => {
+              const merged = { ...(prev || {}), ...data.homePoster } as HomePoster;
+              try {
+                localStorage.setItem('hb_cached_home_poster', JSON.stringify(merged));
+                if (merged.logoUrl) {
+                  localStorage.setItem('hb_custom_logo', merged.logoUrl);
+                  window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: merged.logoUrl }));
+                }
+              } catch {}
+              return merged;
+            });
           }
           if (data.donationInfo) {
             const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
             const accounts = (data.donationInfo.bankAccounts && data.donationInfo.bankAccounts.length > 0)
               ? data.donationInfo.bankAccounts.map((acc: any, idx: number) => {
                   const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
-                  const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+                  const hasValidQr = isValidQrUrl(acc.qrImageUrl);
                   return {
                     ...acc,
                     qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
@@ -540,8 +562,21 @@ export default function App() {
     try {
       setIsSyncing(true);
       setHomePoster(poster);
-      try { localStorage.setItem('hb_cached_home_poster', JSON.stringify(poster)); } catch {}
+      try {
+        localStorage.setItem('hb_cached_home_poster', JSON.stringify(poster));
+        if (poster.logoUrl) {
+          localStorage.setItem('hb_custom_logo', poster.logoUrl);
+          window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: poster.logoUrl }));
+        } else if (poster.logoUrl === '') {
+          localStorage.removeItem('hb_custom_logo');
+          window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: '/hb-logo.svg' }));
+        }
+      } catch {}
       triggerSyncIndicator();
+
+      const fsPromise = saveHomePosterToFirestore(poster).catch((e) =>
+        console.warn('Client firestore saveHomePoster notice:', e)
+      );
 
       const apiPromise = fetch('/api/save-home-poster', {
         method: 'POST',
@@ -549,11 +584,7 @@ export default function App() {
         body: JSON.stringify({ homePoster: poster }),
       }).catch(() => {});
 
-      const fsPromise = saveHomePosterToFirestore(poster).catch((e) =>
-        console.warn('Client firestore saveHomePoster notice:', e)
-      );
-
-      await Promise.allSettled([apiPromise, fsPromise]);
+      await Promise.allSettled([fsPromise, apiPromise]);
     } catch (err) {
       setIsSyncing(false);
       console.error('Save poster error:', err);
@@ -665,7 +696,16 @@ export default function App() {
         if (snapshot.exists()) {
           const data = snapshot.data() as HomePoster;
           setHomePoster(data);
-          try { localStorage.setItem('hb_cached_home_poster', JSON.stringify(data)); } catch {}
+          try {
+            localStorage.setItem('hb_cached_home_poster', JSON.stringify(data));
+            if (data.logoUrl) {
+              localStorage.setItem('hb_custom_logo', data.logoUrl);
+              window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: data.logoUrl }));
+            } else if (data.logoUrl === '') {
+              localStorage.removeItem('hb_custom_logo');
+              window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: '/hb-logo.svg' }));
+            }
+          } catch {}
         }
       }, (err) => {
         console.warn('Home poster sync notice (offline or reconnecting):', err?.message || err);
@@ -674,8 +714,20 @@ export default function App() {
       unsubDonation = onSnapshot(doc(db, 'app_config', 'donationInfo'), (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data() as DonationInfo;
-          setDonationInfo(data);
-          try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(data)); } catch {}
+          const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
+          const accounts = (data.bankAccounts && data.bankAccounts.length > 0)
+            ? data.bankAccounts.map((acc: any, idx: number) => {
+                const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
+                const hasValidQr = isValidQrUrl(acc.qrImageUrl);
+                return {
+                  ...acc,
+                  qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
+                };
+              })
+            : defaults;
+          const cleanDonation = { ...data, bankAccounts: accounts };
+          setDonationInfo(cleanDonation);
+          try { localStorage.setItem('hb_cached_donation_info', JSON.stringify(cleanDonation)); } catch {}
         }
       }, (err) => {
         console.warn('Donation info sync notice (offline or reconnecting):', err?.message || err);
@@ -1032,6 +1084,31 @@ export default function App() {
 
   const hasCustomBgColor = Boolean(homePoster?.bgColor && homePoster.bgColor.trim() !== '' && homePoster.bgColor.trim() !== '#ffffff');
   const hasCustomBgImage = Boolean(homePoster?.bgImageUrl && homePoster.bgImageUrl.trim() !== '');
+  const [resolvedBgImageUrl, setResolvedBgImageUrl] = useState<string>(() =>
+    getCachedUploadUrl(homePoster?.bgImageUrl || '')
+  );
+
+  useEffect(() => {
+    const rawBg = homePoster?.bgImageUrl?.trim() || '';
+    if (!rawBg) {
+      setResolvedBgImageUrl('');
+      return;
+    }
+    const cached = getCachedUploadUrl(rawBg);
+    setResolvedBgImageUrl(cached);
+    if (rawBg.includes('/uploads/')) {
+      let active = true;
+      resolveUploadUrl(rawBg).then((resolved) => {
+        if (active && resolved) {
+          setResolvedBgImageUrl(resolved);
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }
+  }, [homePoster?.bgImageUrl]);
+
   const bgBrightness = typeof homePoster?.bgBrightness === 'number' ? homePoster.bgBrightness : 100;
   const bgBlur = typeof homePoster?.bgBlur === 'number' ? homePoster.bgBlur : 0;
   const bgWhiteOverlayOpacity = typeof homePoster?.bgWhiteOverlayOpacity === 'number'
@@ -1064,7 +1141,7 @@ export default function App() {
           <div
             className="absolute -inset-4 bg-cover bg-center bg-no-repeat transition-all duration-300 scale-105"
             style={{
-              backgroundImage: `url("${homePoster!.bgImageUrl}")`,
+              backgroundImage: `url("${resolvedBgImageUrl || homePoster!.bgImageUrl}")`,
               filter: `blur(${bgBlur}px) brightness(${bgBrightness}%)`,
             }}
           />
@@ -1365,15 +1442,18 @@ export default function App() {
           if (savedVillage) {
             setVillages((prev) => {
               const exists = prev.some((v) => v.rowId === savedVillage.rowId || v.id === savedVillage.id);
-              if (exists) {
-                return prev.map((v) =>
-                  v.rowId === savedVillage.rowId || v.id === savedVillage.id ? { ...v, ...savedVillage } : v
-                );
-              }
-              return [...prev, savedVillage];
+              const updated = exists
+                ? prev.map((v) =>
+                    v.rowId === savedVillage.rowId || v.id === savedVillage.id ? { ...v, ...savedVillage } : v
+                  )
+                : [...prev, savedVillage];
+              try {
+                localStorage.setItem('hb_cached_villages', JSON.stringify(updated));
+              } catch {}
+              return updated;
             });
           }
-          fetchMinistryData();
+          triggerSyncIndicator();
         }}
         language={language}
       />
@@ -1399,7 +1479,7 @@ export default function App() {
               return updated;
             });
           }
-          fetchMinistryData();
+          triggerSyncIndicator();
         }}
         language={language}
       />
@@ -1427,7 +1507,7 @@ export default function App() {
               return updated;
             });
           }
-          fetchMinistryData();
+          triggerSyncIndicator();
         }}
         language={language}
       />

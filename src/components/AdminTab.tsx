@@ -267,14 +267,26 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   const [pinSavedToast, setPinSavedToast] = useState<string>('');
   const [selectedAdminReportEvent, setSelectedAdminReportEvent] = useState<EventData | null>(null);
 
+  const isValidQrImage = (url?: string): boolean => {
+    if (!url || typeof url !== 'string') return false;
+    const t = url.trim();
+    return (
+      t.startsWith('data:image') ||
+      t.startsWith('/uploads/') ||
+      t.startsWith('http://') ||
+      t.startsWith('https://') ||
+      t.startsWith('blob:')
+    );
+  };
+
   // Donation Settings Local State
   const [donationBankName, setDonationBankName] = useState<string>(donationInfo?.bankName || 'ທະນາຄານ ການຄ້າຕ່າງປະເທດລາວ ມະຫາຊົນ (BCEL)');
   const [donationAccountName, setDonationAccountName] = useState<string>(donationInfo?.accountName || 'HOPE BOKEO MINISTRY PROJECT');
   const [donationAccountNumber, setDonationAccountNumber] = useState<string>(donationInfo?.accountNumber || '010-12-00-012345678-001');
   const [donationSwiftCode, setDonationSwiftCode] = useState<string>(donationInfo?.swiftCode || 'BCELLA2X');
   const [donationQrImageUrl, setDonationQrImageUrl] = useState<string>(() => {
-    if (donationInfo?.qrImageUrl && donationInfo.qrImageUrl.startsWith('data:image')) {
-      return donationInfo.qrImageUrl;
+    if (isValidQrImage(donationInfo?.qrImageUrl)) {
+      return donationInfo!.qrImageUrl!;
     }
     const defQr = (initialDefaultDonationBankAccounts as any[])?.[0]?.qrImageUrl;
     return defQr || donationInfo?.qrImageUrl || '';
@@ -284,7 +296,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     if (donationInfo?.bankAccounts && donationInfo.bankAccounts.length > 0) {
       return donationInfo.bankAccounts.map((acc, idx) => {
         const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
-        const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+        const hasValidQr = isValidQrImage(acc.qrImageUrl);
         return {
           ...acc,
           qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
@@ -348,8 +360,8 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (donationInfo.accountName) setDonationAccountName(donationInfo.accountName);
       if (donationInfo.accountNumber) setDonationAccountNumber(donationInfo.accountNumber);
       if (donationInfo.swiftCode !== undefined) setDonationSwiftCode(donationInfo.swiftCode);
-      if (donationInfo.qrImageUrl && donationInfo.qrImageUrl.startsWith('data:image')) {
-        setDonationQrImageUrl(donationInfo.qrImageUrl);
+      if (isValidQrImage(donationInfo.qrImageUrl)) {
+        setDonationQrImageUrl(donationInfo.qrImageUrl!);
       } else {
         setDonationQrImageUrl((defaults[0] as any)?.qrImageUrl || '');
       }
@@ -375,7 +387,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (donationInfo.bankAccounts && donationInfo.bankAccounts.length > 0) {
         const merged = donationInfo.bankAccounts.map((acc, idx) => {
           const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
-          const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+          const hasValidQr = isValidQrImage(acc.qrImageUrl);
           return {
             ...acc,
             qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
@@ -403,7 +415,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (donationInfo.accountNumber) setDonationAccountNumber(donationInfo.accountNumber);
       if (donationInfo.swiftCode !== undefined) setDonationSwiftCode(donationInfo.swiftCode);
       if (donationInfo.qrImageUrl) {
-        if (donationInfo.qrImageUrl.startsWith('data:image')) {
+        if (isValidQrImage(donationInfo.qrImageUrl)) {
           setDonationQrImageUrl(donationInfo.qrImageUrl);
         } else if ((defaults[0] as any)?.qrImageUrl) {
           setDonationQrImageUrl((defaults[0] as any).qrImageUrl);
@@ -431,7 +443,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (donationInfo.bankAccounts && donationInfo.bankAccounts.length > 0) {
         const merged = donationInfo.bankAccounts.map((acc, idx) => {
           const def = defaults[idx] || defaults.find((d) => d.bankName === acc.bankName);
-          const hasValidQr = Boolean(acc.qrImageUrl && acc.qrImageUrl.startsWith('data:image'));
+          const hasValidQr = isValidQrImage(acc.qrImageUrl);
           return {
             ...acc,
             qrImageUrl: hasValidQr ? acc.qrImageUrl : (def?.qrImageUrl || acc.qrImageUrl || ''),
@@ -1548,10 +1560,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
   // Auto generate 4-digit PIN for all villages if missing
   const handleAutoGeneratePins = () => {
+    const saveFn = onSaveVillage || onEditVillage;
     let startPin = 1001;
     villages.forEach((v) => {
       const generated = (startPin++).toString();
-      onEditVillage({
+      saveFn({
         ...v,
         pinCode: v.pinCode || generated,
       });
@@ -1567,7 +1580,8 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   // Save specific village PIN
   const handleSavePin = (v: Village) => {
     if (!tempPin.trim()) return;
-    onEditVillage({
+    const saveFn = onSaveVillage || onEditVillage;
+    saveFn({
       ...v,
       pinCode: tempPin.trim(),
     });
@@ -3499,7 +3513,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
                     <MapAndImageEditorCard
                       key={activeVillage.rowId || activeVillage.id}
                       village={activeVillage}
-                      onSave={onEditVillage}
+                      onSave={onSaveVillage || onEditVillage}
                       language={language}
                     />
                   );

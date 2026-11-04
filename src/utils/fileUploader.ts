@@ -155,7 +155,8 @@ export async function resolveUploadUrl(url: string): Promise<string> {
 export async function saveBase64ToFirestoreUploadedFiles(
   base64Input: string,
   namePrefix = 'img',
-  explicitMimeType?: string
+  explicitMimeType?: string,
+  explicitFilename?: string
 ): Promise<string> {
   let mimeType = explicitMimeType || 'image/jpeg';
   let rawBase64 = base64Input;
@@ -178,7 +179,9 @@ export async function saveBase64ToFirestoreUploadedFiles(
   else if (mimeType.includes('pdf')) ext = '.pdf';
 
   const cleanPrefix = namePrefix.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32) || 'img';
-  const filename = `${cleanPrefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
+  const filename = explicitFilename
+    ? explicitFilename.replace(/^\/uploads\//, '')
+    : `${cleanPrefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
   const docId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
   const uploadPath = `/uploads/${filename}`;
 
@@ -224,8 +227,10 @@ export async function saveBase64ToFirestoreUploadedFiles(
       chunks.map((chunkStr, i) =>
         setDoc(doc(db, 'uploaded_file_chunks', `${docId}_chk_${i}`), {
           fileId: docId,
+          docId,
           filename,
           index: i,
+          chunkIndex: i,
           chunk: chunkStr,
           updatedAt: new Date().toISOString(),
         })
@@ -254,6 +259,13 @@ export async function uploadFileDirectly(file: File): Promise<UploadResult> {
       const data = await response.json();
       if (data.success && data.url) {
         uploadBlobUrlCache.set(data.url, instantBlobUrl);
+        // Also ensure the file is persisted in client-side Cloud Firestore under the exact same /uploads/ filename
+        // so that all other devices/deployments (e.g. Netlify) immediately resolve it in real time
+        try {
+          await uploadFileToFirestoreDirectly(file, instantBlobUrl, data.url);
+        } catch (fsErr) {
+          console.warn('Client Firestore mirror notice:', fsErr);
+        }
         return {
           success: true,
           url: data.url,
@@ -279,7 +291,8 @@ export async function uploadFileDirectly(file: File): Promise<UploadResult> {
  */
 export async function uploadFileToFirestoreDirectly(
   file: File,
-  existingBlobUrl?: string
+  existingBlobUrl?: string,
+  explicitUploadUrl?: string
 ): Promise<UploadResult> {
   const ext = inferExtFromFile(file);
   const cleanBaseName =
@@ -302,7 +315,12 @@ export async function uploadFileToFirestoreDirectly(
   });
 
   const mimeType = inferMimeFromFilename(ext, file.type);
-  const uploadUrl = await saveBase64ToFirestoreUploadedFiles(base64Data, cleanBaseName, mimeType);
+  const uploadUrl = await saveBase64ToFirestoreUploadedFiles(
+    base64Data,
+    cleanBaseName,
+    mimeType,
+    explicitUploadUrl
+  );
 
   if (existingBlobUrl) {
     uploadBlobUrlCache.set(uploadUrl, existingBlobUrl);
@@ -321,11 +339,41 @@ let globalResolverInitialized = false;
 /**
  * Installs a global listener that automatically resolves any `<img src="/uploads/...">`
  * from Cloud Firestore `uploaded_files` / `uploaded_file_chunks` if the static server (e.g. Netlify)
- * returns 404 or if the file was already cached in memory.
+ * returns 404 or if the file was uploaded to Firestore.
  */
 export function initGlobalUploadUrlResolver(): void {
   if (globalResolverInitialized || typeof window === 'undefined') return;
   globalResolverInitialized = true;
+
+  const resolveImgFromFirestore = (img: HTMLImageElement, rawSrc: string) => {
+    if (!rawSrc || !rawSrc.includes('/uploads/')) return;
+    const match = rawSrc.match(/\/uploads\/([^?#]+)/);
+    if (!match) return;
+    const normalizedKey = `/uploads/${decodeURIComponent(match[1])}`;
+
+    const cached = uploadBlobUrlCache.get(normalizedKey);
+    if (cached) {
+      if (img.src !== cached) {
+        img.src = cached;
+        if (img.style.display === 'none') {
+          img.style.display = '';
+        }
+      }
+      return;
+    }
+
+    resolveUploadUrl(normalizedKey)
+      .then((resolvedUrl) => {
+        if (resolvedUrl && resolvedUrl !== normalizedKey && resolvedUrl !== rawSrc) {
+          img.dataset.UploadResolved = normalizedKey;
+          img.src = resolvedUrl;
+          if (img.style.display === 'none') {
+            img.style.display = '';
+          }
+        }
+      })
+      .catch(() => {});
+  };
 
   // 1. Capture-phase error listener on <img> elements for `/uploads/...`
   window.addEventListener(
@@ -334,36 +382,19 @@ export function initGlobalUploadUrlResolver(): void {
       const target = event.target as HTMLElement | null;
       if (!target || target.tagName !== 'IMG') return;
       const img = target as HTMLImageElement;
-      const rawSrc = img.getAttribute('src') || img.src || '';
+      const rawSrc = img.getAttribute('src') || img.dataset.originalUploadSrc || img.src || '';
       if (!rawSrc.includes('/uploads/')) return;
-      if (img.dataset.UploadResolved === rawSrc) return;
-
-      img.dataset.UploadResolved = rawSrc;
-      resolveUploadUrl(rawSrc)
-        .then((resolvedUrl) => {
-          if (resolvedUrl && resolvedUrl !== rawSrc) {
-            img.src = resolvedUrl;
-            if (img.style.display === 'none') {
-              img.style.display = '';
-            }
-          }
-        })
-        .catch(() => {});
+      resolveImgFromFirestore(img, rawSrc);
     },
     true
   );
 
-  // 2. Proactive observer for any <img src="/uploads/..."> that already has an in-memory blob URL
+  // 2. Proactive observer for any <img src="/uploads/..."> added or updated in DOM
   const upgradeImgElement = (img: HTMLImageElement) => {
     const rawSrc = img.getAttribute('src') || '';
-    if (!rawSrc.startsWith('/uploads/')) return;
-    const cached = uploadBlobUrlCache.get(rawSrc);
-    if (cached && img.src !== cached) {
-      img.src = cached;
-      if (img.style.display === 'none') {
-        img.style.display = '';
-      }
-    }
+    if (!rawSrc.includes('/uploads/')) return;
+    img.dataset.originalUploadSrc = rawSrc;
+    resolveImgFromFirestore(img, rawSrc);
   };
 
   if (typeof MutationObserver !== 'undefined') {

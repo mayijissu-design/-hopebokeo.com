@@ -26,6 +26,7 @@ import { EventReportModal } from './EventReportModal';
 import { getVillageGPS } from './MapsTab';
 import { UpcomingEventPoster } from './UpcomingEventPoster';
 import { RealBokeoMap } from './RealBokeoMap';
+import { handleImageErrorWithFirestore } from '../utils/imageFallback';
 
 interface HomeTabProps {
   events: EventData[];
@@ -123,6 +124,38 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       return {};
     }
   });
+
+  // Sync prayer counts from Firestore homePoster whenever admin updates them in Settings
+  useEffect(() => {
+    if (!homePoster) return;
+    setPrayerCounts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      if (Array.isArray(homePoster.prayerBoxes) && homePoster.prayerBoxes.length > 0) {
+        homePoster.prayerBoxes.forEach((box) => {
+          if (box && box.id && typeof box.count === 'number' && next[box.id] !== box.count) {
+            next[box.id] = box.count;
+            changed = true;
+          }
+        });
+      }
+      if (Array.isArray(homePoster.prayerModalItems) && homePoster.prayerModalItems.length > 0) {
+        homePoster.prayerModalItems.forEach((item) => {
+          if (item && item.id && typeof item.count === 'number' && next[item.id] !== item.count) {
+            next[item.id] = item.count;
+            changed = true;
+          }
+        });
+      }
+      if (changed) {
+        try {
+          localStorage.setItem('hope_bokeo_prayer_counts', JSON.stringify(next));
+        } catch {}
+        return next;
+      }
+      return prev;
+    });
+  }, [homePoster?.prayerBoxes, homePoster?.prayerModalItems]);
 
   // Story carousel page index
   const [storyCarouselIndex, setStoryCarouselIndex] = useState<number>(0);
@@ -732,10 +765,9 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                   }`}
                   style={getPosterImageStyle(idx)}
                   loading={idx === 0 ? 'eager' : 'lazy'}
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src =
-                      'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=1800';
-                  }}
+                  onError={handleImageErrorWithFirestore(
+                    'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=1800'
+                  )}
                 />
               );
             })}
@@ -1104,10 +1136,9 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                       src={loc.imageUrl}
                       alt={displayTitle}
                       className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).src =
-                          'https://images.unsplash.com/photo-1548625361-188683526017?q=80&w=400';
-                      }}
+                      onError={handleImageErrorWithFirestore(
+                        'https://images.unsplash.com/photo-1548625361-188683526017?q=80&w=400'
+                      )}
                     />
                   </div>
 
@@ -1188,10 +1219,9 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                     alt={displayTitle}
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     loading="lazy"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src =
-                        'https://images.unsplash.com/photo-1511632765486-a01980e01a18?q=80&w=800';
-                    }}
+                    onError={handleImageErrorWithFirestore(
+                      'https://images.unsplash.com/photo-1511632765486-a01980e01a18?q=80&w=800'
+                    )}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
                 </div>
@@ -1238,10 +1268,9 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               }
               alt="Mekong River Sunset in Bokeo"
               className="w-full h-full object-cover object-center brightness-75 contrast-110"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src =
-                  'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=1600';
-              }}
+              onError={handleImageErrorWithFirestore(
+                'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=1600'
+              )}
             />
             {/* Subtle dark gradient overlay */}
             <div className="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-950/60 to-slate-950/40 pointer-events-none" />

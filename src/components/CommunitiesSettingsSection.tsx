@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Save,
   RotateCcw,
@@ -136,6 +136,38 @@ export const CommunitiesSettingsSection: React.FC<CommunitiesSettingsSectionProp
   const [storiesButtonTh, setStoriesButtonTh] = useState<string>(
     homePoster?.storiesButtonTextTh || 'ดูเรื่องราวทั้งหมด'
   );
+
+  // Sync local form state when homePoster updates in real time from Firestore
+  useEffect(() => {
+    if (!homePoster) return;
+    setHideMapSectionDesc(Boolean(homePoster.hideMapSectionDesc));
+    if (homePoster.mapSectionBadge !== undefined) setMapBadgeLo(homePoster.mapSectionBadge || 'WHERE GOD IS WORKING');
+    if (homePoster.mapSectionBadgeEn !== undefined) setMapBadgeEn(homePoster.mapSectionBadgeEn || 'WHERE GOD IS WORKING');
+    if (homePoster.mapSectionBadgeTh !== undefined) setMapBadgeTh(homePoster.mapSectionBadgeTh || 'WHERE GOD IS WORKING');
+    if (homePoster.mapSectionTitle !== undefined) setMapTitleLo(homePoster.mapSectionTitle || 'Communities, Churches.\nLasting Change.');
+    if (homePoster.mapSectionTitleEn !== undefined) setMapTitleEn(homePoster.mapSectionTitleEn || 'Communities, Churches.\nLasting Change.');
+    if (homePoster.mapSectionTitleTh !== undefined) setMapTitleTh(homePoster.mapSectionTitleTh || 'Communities, Churches.\nLasting Change.');
+    if (homePoster.mapSectionDesc !== undefined) setMapDescLo(homePoster.mapSectionDesc);
+    if (homePoster.mapSectionDescEn !== undefined) setMapDescEn(homePoster.mapSectionDescEn);
+    if (homePoster.mapSectionDescTh !== undefined) setMapDescTh(homePoster.mapSectionDescTh);
+    if (homePoster.mapSectionButtonText !== undefined) setMapButtonLo(homePoster.mapSectionButtonText || 'ເບິ່ງສະຖານທີ່ທັງໝົດ');
+    if (homePoster.mapSectionButtonTextEn !== undefined) setMapButtonEn(homePoster.mapSectionButtonTextEn || 'View All Locations');
+    if (homePoster.mapSectionButtonTextTh !== undefined) setMapButtonTh(homePoster.mapSectionButtonTextTh || 'ดูสถานที่ทั้งหมด');
+
+    setHideStoriesDesc(Boolean(homePoster.hideStoriesDesc));
+    if (homePoster.storiesBadgeText !== undefined) setStoriesBadgeLo(homePoster.storiesBadgeText || 'ເລື່ອງລາວຈາກພາກສະໜາມ');
+    if (homePoster.storiesBadgeTextEn !== undefined) setStoriesBadgeEn(homePoster.storiesBadgeTextEn || 'STORIES FROM THE FIELD');
+    if (homePoster.storiesBadgeTextTh !== undefined) setStoriesBadgeTh(homePoster.storiesBadgeTextTh || 'เรื่องราวจากภาคสนาม');
+    if (homePoster.storiesTitle !== undefined) setStoriesTitleLo(homePoster.storiesTitle || 'Real People. Real Hope.');
+    if (homePoster.storiesTitleEn !== undefined) setStoriesTitleEn(homePoster.storiesTitleEn || 'Real People. Real Hope.');
+    if (homePoster.storiesTitleTh !== undefined) setStoriesTitleTh(homePoster.storiesTitleTh || 'Real People. Real Hope.');
+    if (homePoster.storiesDesc !== undefined) setStoriesDescLo(homePoster.storiesDesc);
+    if (homePoster.storiesDescEn !== undefined) setStoriesDescEn(homePoster.storiesDescEn);
+    if (homePoster.storiesDescTh !== undefined) setStoriesDescTh(homePoster.storiesDescTh);
+    if (homePoster.storiesButtonText !== undefined) setStoriesButtonLo(homePoster.storiesButtonText || 'ເບິ່ງເລື່ອງລາວທັງໝົດ');
+    if (homePoster.storiesButtonTextEn !== undefined) setStoriesButtonEn(homePoster.storiesButtonTextEn || 'View All Stories');
+    if (homePoster.storiesButtonTextTh !== undefined) setStoriesButtonTh(homePoster.storiesButtonTextTh || 'ดูเรื่องราวทั้งหมด');
+  }, [homePoster]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);

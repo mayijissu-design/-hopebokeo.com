@@ -238,6 +238,42 @@ export const PrayerSettingsSection: React.FC<PrayerSettingsSectionProps> = ({
     return DEFAULT_PRAYER_ITEMS;
   });
 
+  // Sync local form state when homePoster updates in real time from Firestore
+  useEffect(() => {
+    if (!homePoster) return;
+    setHidePrayerSection(Boolean(homePoster.hidePrayerSection));
+    if (homePoster.prayerBadgeText !== undefined) setBadgeTextLo(homePoster.prayerBadgeText || 'ຫົວຂໍ້ອະທິຖານ');
+    if (homePoster.prayerBadgeTextEn !== undefined) setBadgeTextEn(homePoster.prayerBadgeTextEn || 'PRAYER NEEDS');
+    if (homePoster.prayerBadgeTextTh !== undefined) setBadgeTextTh(homePoster.prayerBadgeTextTh || 'หัวข้ออธิษฐาน');
+    if (homePoster.prayerTitle !== undefined) setTitleLo(homePoster.prayerTitle || 'ທ່ານຈະຮ່ວມອະທິຖານກັບພວກເຮົາບໍ?');
+    if (homePoster.prayerTitleEn !== undefined) setTitleEn(homePoster.prayerTitleEn || 'Will you pray with us?');
+    if (homePoster.prayerTitleTh !== undefined) setTitleTh(homePoster.prayerTitleTh || 'คุณจะร่วมอธิษฐานกับเราไหม?');
+    if (homePoster.prayerSubtitle !== undefined) setSubtitleLo(homePoster.prayerSubtitle || 'ນີ້ແມ່ນຫົວຂໍ້ອະທິຖານອັນຮີບດ່ວນໃນແຂວງບໍ່ແກ້ວເວລານີ້.');
+    if (homePoster.prayerSubtitleEn !== undefined) setSubtitleEn(homePoster.prayerSubtitleEn || 'Here are a few urgent needs in Bokeo right now.');
+    if (homePoster.prayerSubtitleTh !== undefined) setSubtitleTh(homePoster.prayerSubtitleTh || 'นี่คือหัวข้ออธิษฐานเร่งด่วนในบ่อแก้วในเวลานี้');
+    if (homePoster.prayerButtonText !== undefined) setButtonTextLo(homePoster.prayerButtonText || 'ເບິ່ງຫົວຂໍ້ອະທິຖານ →');
+    if (homePoster.prayerButtonTextEn !== undefined) setButtonTextEn(homePoster.prayerButtonTextEn || 'View Prayer Needs →');
+    if (homePoster.prayerButtonTextTh !== undefined) setButtonTextTh(homePoster.prayerButtonTextTh || 'ดูหัวข้ออธิษฐาน →');
+    if (homePoster.prayerBgImageUrl !== undefined) {
+      setBgImageUrl(homePoster.prayerBgImageUrl || 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=1600');
+    }
+    if (homePoster.prayerPrayingCountSuffix !== undefined) setCountSuffixLo(homePoster.prayerPrayingCountSuffix || 'ຄົນກຳລັງອະທິຖານ');
+    if (homePoster.prayerPrayingCountSuffixEn !== undefined) setCountSuffixEn(homePoster.prayerPrayingCountSuffixEn || 'praying');
+    if (homePoster.prayerPrayingCountSuffixTh !== undefined) setCountSuffixTh(homePoster.prayerPrayingCountSuffixTh || 'คนกำลังอธิษฐาน');
+    if (homePoster.prayerBoxes && Array.isArray(homePoster.prayerBoxes) && homePoster.prayerBoxes.length > 0) {
+      setPrayerBoxes(homePoster.prayerBoxes);
+    }
+    if (homePoster.prayerModalTitle !== undefined) setModalTitleLo(homePoster.prayerModalTitle || 'ຫົວຂໍ້ອະທິຖານເພື່ອແຂວງບໍ່ແກ້ວ');
+    if (homePoster.prayerModalTitleEn !== undefined) setModalTitleEn(homePoster.prayerModalTitleEn || 'Prayer Needs for Bokeo');
+    if (homePoster.prayerModalTitleTh !== undefined) setModalTitleTh(homePoster.prayerModalTitleTh || 'หัวข้ออธิษฐานเพื่อแขวงบ่อแก้ว');
+    if (homePoster.prayerModalSubtitle !== undefined) setModalSubtitleLo(homePoster.prayerModalSubtitle || 'ຮ່ວມອະທິຖານ ແລະ ກົດຖືກໃຈເພື່ອຮ່ວມອະທິຖານ');
+    if (homePoster.prayerModalSubtitleEn !== undefined) setModalSubtitleEn(homePoster.prayerModalSubtitleEn || 'Stand in faith with our local field team');
+    if (homePoster.prayerModalSubtitleTh !== undefined) setModalSubtitleTh(homePoster.prayerModalSubtitleTh || 'ร่วมอธิษฐาน และกดถูกใจเพื่อร่วมอธิษฐาน');
+    if (homePoster.prayerModalItems && Array.isArray(homePoster.prayerModalItems) && homePoster.prayerModalItems.length > 0) {
+      setModalItems(homePoster.prayerModalItems);
+    }
+  }, [homePoster]);
+
   const handleUpdateModalItem = (index: number, field: keyof PrayerTopicItem, value: any) => {
     setModalItems((prev) => {
       const next = [...prev];

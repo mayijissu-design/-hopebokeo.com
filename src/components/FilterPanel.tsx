@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Village, Language, HomePoster } from '../types';
 import { getLocalizedDistrict, getLocalizedProvince, getLocalizedVillageName } from '../utils/localization';
+import { handleImageErrorWithFirestore } from '../utils/imageFallback';
 
 export type TimeRange = 'all' | 'week' | 'month' | 'year' | 'custom';
 
@@ -175,10 +176,9 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
               transform: `scale(${posterScale / 100})`,
               filter: `brightness(${Math.max(20, 100 - posterDim * 0.75)}%)`,
             }}
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).src =
-                'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=1600';
-            }}
+            onError={handleImageErrorWithFirestore(
+              'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=1600'
+            )}
           />
           <div
             className="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-950/55 to-slate-950/80 pointer-events-none"
