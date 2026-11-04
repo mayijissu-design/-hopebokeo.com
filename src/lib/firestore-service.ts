@@ -387,9 +387,9 @@ export async function deleteTeamFromFirestore(rowId: number, id?: string) {
 }
 
 export async function saveHomePosterToFirestore(poster: any) {
-  let safePoster = poster;
+  let safePoster = { ...poster, updatedAt: new Date().toISOString() };
   if (!safePoster?._isOptimized) {
-    safePoster = await optimizePosterForFirestore(poster);
+    safePoster = await optimizePosterForFirestore(safePoster);
   }
   const jsonSize = JSON.stringify(safePoster).length;
   
@@ -399,14 +399,14 @@ export async function saveHomePosterToFirestore(poster: any) {
   }
 
   try {
-    await setDoc(doc(db, CONFIG_COL, 'homePoster'), sanitizeForFirestore(safePoster));
+    await setDoc(doc(db, CONFIG_COL, 'homePoster'), sanitizeForFirestore(safePoster), { merge: true });
   } catch (err: any) {
     console.warn('Firestore setDoc initial attempt warning:', err);
     // If size limit error occurred, run emergency compression and retry
     if (err?.message?.includes('exceeds the maximum allowed size') || err?.message?.includes('too large') || jsonSize > 850000) {
       console.warn('Retrying saveHomePoster with deep compression...');
       safePoster = await emergencyCompressObject(safePoster);
-      await setDoc(doc(db, CONFIG_COL, 'homePoster'), sanitizeForFirestore(safePoster));
+      await setDoc(doc(db, CONFIG_COL, 'homePoster'), sanitizeForFirestore(safePoster), { merge: true });
       return;
     }
     throw err;
@@ -414,7 +414,29 @@ export async function saveHomePosterToFirestore(poster: any) {
 }
 
 export async function saveDonationInfoToFirestore(info: any) {
-  await setDoc(doc(db, CONFIG_COL, 'donationInfo'), sanitizeForFirestore(info), { merge: true });
+  await setDoc(
+    doc(db, CONFIG_COL, 'donationInfo'),
+    sanitizeForFirestore({ ...info, updatedAt: new Date().toISOString() }),
+    { merge: true }
+  );
+}
+
+export async function saveGlobalSettingsToFirestore(settings: {
+  autoThemeEnabled?: boolean;
+  autoThemeStart?: string;
+  autoThemeEnd?: string;
+  darkModeDefault?: boolean;
+  logoUrl?: string;
+}) {
+  try {
+    await setDoc(
+      doc(db, CONFIG_COL, 'globalSettings'),
+      sanitizeForFirestore({ ...settings, updatedAt: new Date().toISOString() }),
+      { merge: true }
+    );
+  } catch (e) {
+    console.warn('saveGlobalSettingsToFirestore notice:', e);
+  }
 }
 
 function mergeWithDefaultDonations(loaded: any[]): any[] {
@@ -475,27 +497,36 @@ export async function loadFinanceData() {
     }
   } catch {}
 
-  // 3. Also read from Firestore (online or cache) so records added on live deployments are never lost
+  // 3. Read from Firestore (online or cache) so records and settings added on live deployments are always prioritized
   let fsDonations: any[] = [];
   let fsDistributions: any[] = [];
+  let fsSettings: any = null;
   try {
     try {
       const donSnap = await getDocs(collection(db, DONATIONS_COL));
       fsDonations = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       const distSnap = await getDocs(collection(db, DISTRIBUTIONS_COL));
       fsDistributions = distSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const settingsSnap = await getDoc(doc(db, CONFIG_COL, 'financeSettings'));
+      if (settingsSnap.exists()) {
+        fsSettings = settingsSnap.data();
+      }
     } catch {
       try {
-        const { getDocsFromCache } = await import('firebase/firestore');
+        const { getDocsFromCache, getDocFromCache } = await import('firebase/firestore');
         const donSnap = await getDocsFromCache(collection(db, DONATIONS_COL));
         fsDonations = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         const distSnap = await getDocsFromCache(collection(db, DISTRIBUTIONS_COL));
         fsDistributions = distSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const settingsSnap = await getDocFromCache(doc(db, CONFIG_COL, 'financeSettings'));
+        if (settingsSnap.exists()) {
+          fsSettings = settingsSnap.data();
+        }
       } catch {}
     }
   } catch {}
 
-  // Merge by ID (combining disk ledger + Firestore records)
+  // Merge by ID (prioritizing live Firestore records over disk ledger)
   const mergeById = (primary: any[], secondary: any[]) => {
     const map = new Map<string, any>();
     for (const item of secondary) {
@@ -530,7 +561,7 @@ export async function loadFinanceData() {
   const finalDistributions = mergeWithDefaultDistributions(
     combinedDistributions.length > 0 ? combinedDistributions : initialDefaultFinanceData.distributions
   );
-  const finalSettings = apiSettings || cachedSettings || initialDefaultFinanceData.financeSettings;
+  const finalSettings = fsSettings || apiSettings || cachedSettings || initialDefaultFinanceData.financeSettings;
 
   try {
     if (typeof localStorage !== 'undefined') {
@@ -752,24 +783,7 @@ export async function loadFinanceQrMembers() {
     return Array.from(map.values());
   };
 
-  // 1. Fetch from server backend
-  try {
-    const res = await fetch('/api/finance-qr-members');
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && Array.isArray(json.qrMembers) && json.qrMembers.length > 0) {
-        const merged = mergeWithDefaults(json.qrMembers);
-        try {
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('hb_cached_qr_members', JSON.stringify(merged));
-          }
-        } catch {}
-        return merged;
-      }
-    }
-  } catch {}
-
-  // 2. Try Firestore
+  // 1. Prioritize live Cloud Firestore first so changes sync globally across all visitors
   try {
     const snap = await getDocs(collection(db, FINANCE_QR_MEMBERS_COL));
     const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -793,6 +807,23 @@ export async function loadFinanceQrMembers() {
       }
     } catch {}
   }
+
+  // 2. Fallback to server backend if Firestore collection was empty or offline
+  try {
+    const res = await fetch('/api/finance-qr-members');
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.qrMembers) && json.qrMembers.length > 0) {
+        const merged = mergeWithDefaults(json.qrMembers);
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('hb_cached_qr_members', JSON.stringify(merged));
+          }
+        } catch {}
+        return merged;
+      }
+    }
+  } catch {}
 
   const finalResult = mergeWithDefaults(cachedQr);
   try {

@@ -39,6 +39,7 @@ import { LogoBgRemover } from './LogoBgRemover';
 import { WordStyleScheduleEditor } from './WordStyleScheduleEditor';
 import { compressImageFile } from '../utils/imageCompressor';
 import { uploadFileDirectly } from '../utils/fileUploader';
+import { db, doc, setDoc } from '../lib/firebase';
 
 interface PosterSettingsSectionProps {
   language: Language;
@@ -2025,6 +2026,13 @@ export const PosterSettingsSection: React.FC<PosterSettingsSectionProps> = ({
                     );
                   } catch {}
                 }
+                if (db) {
+                  setDoc(
+                    doc(db, 'app_config', 'homePoster'),
+                    { logoUrl: url || '', updatedAt: new Date().toISOString() },
+                    { merge: true }
+                  ).catch(() => {});
+                }
               }}
               language={language}
               label={
@@ -2044,6 +2052,13 @@ export const PosterSettingsSection: React.FC<PosterSettingsSectionProps> = ({
                   localStorage.setItem('hb_custom_logo', newTransparentUrl);
                   window.dispatchEvent(new CustomEvent('hb_logo_updated', { detail: newTransparentUrl }));
                 } catch {}
+                if (db) {
+                  setDoc(
+                    doc(db, 'app_config', 'homePoster'),
+                    { logoUrl: newTransparentUrl || '', updatedAt: new Date().toISOString() },
+                    { merge: true }
+                  ).catch(() => {});
+                }
               }}
               language={language}
               disabled={!isEditingPoster}

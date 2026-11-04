@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Save,
   RotateCcw,
@@ -137,9 +137,12 @@ export const CommunitiesSettingsSection: React.FC<CommunitiesSettingsSectionProp
     homePoster?.storiesButtonTextTh || 'ดูเรื่องราวทั้งหมด'
   );
 
+  const isHydratingRef = useRef(false);
+
   // Sync local form state when homePoster updates in real time from Firestore
   useEffect(() => {
     if (!homePoster) return;
+    isHydratingRef.current = true;
     setHideMapSectionDesc(Boolean(homePoster.hideMapSectionDesc));
     if (homePoster.mapSectionBadge !== undefined) setMapBadgeLo(homePoster.mapSectionBadge || 'WHERE GOD IS WORKING');
     if (homePoster.mapSectionBadgeEn !== undefined) setMapBadgeEn(homePoster.mapSectionBadgeEn || 'WHERE GOD IS WORKING');
@@ -167,7 +170,87 @@ export const CommunitiesSettingsSection: React.FC<CommunitiesSettingsSectionProp
     if (homePoster.storiesButtonText !== undefined) setStoriesButtonLo(homePoster.storiesButtonText || 'ເບິ່ງເລື່ອງລາວທັງໝົດ');
     if (homePoster.storiesButtonTextEn !== undefined) setStoriesButtonEn(homePoster.storiesButtonTextEn || 'View All Stories');
     if (homePoster.storiesButtonTextTh !== undefined) setStoriesButtonTh(homePoster.storiesButtonTextTh || 'ดูเรื่องราวทั้งหมด');
+
+    setTimeout(() => {
+      isHydratingRef.current = false;
+    }, 150);
   }, [homePoster]);
+
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    if (isHydratingRef.current) return;
+
+    const timer = setTimeout(() => {
+      if (isHydratingRef.current) return;
+      const draft: HomePoster = {
+        title: homePoster?.title || 'HOPE BOKEO',
+        subtitle: homePoster?.subtitle || '',
+        description: homePoster?.description || '',
+        imageUrl: homePoster?.imageUrl || '',
+        ...(homePoster || {}),
+        hideMapSectionDesc,
+        mapSectionBadge: mapBadgeLo.trim(),
+        mapSectionBadgeEn: mapBadgeEn.trim(),
+        mapSectionBadgeTh: mapBadgeTh.trim(),
+        mapSectionTitle: mapTitleLo.trim(),
+        mapSectionTitleEn: mapTitleEn.trim(),
+        mapSectionTitleTh: mapTitleTh.trim(),
+        mapSectionDesc: mapDescLo.trim(),
+        mapSectionDescEn: mapDescEn.trim(),
+        mapSectionDescTh: mapDescTh.trim(),
+        mapSectionButtonText: mapButtonLo.trim(),
+        mapSectionButtonTextEn: mapButtonEn.trim(),
+        mapSectionButtonTextTh: mapButtonTh.trim(),
+        hideStoriesDesc,
+        storiesBadgeText: storiesBadgeLo.trim(),
+        storiesBadgeTextEn: storiesBadgeEn.trim(),
+        storiesBadgeTextTh: storiesBadgeTh.trim(),
+        storiesTitle: storiesTitleLo.trim(),
+        storiesTitleEn: storiesTitleEn.trim(),
+        storiesTitleTh: storiesTitleTh.trim(),
+        storiesDesc: storiesDescLo.trim(),
+        storiesDescEn: storiesDescEn.trim(),
+        storiesDescTh: storiesDescTh.trim(),
+        storiesButtonText: storiesButtonLo.trim(),
+        storiesButtonTextEn: storiesButtonEn.trim(),
+        storiesButtonTextTh: storiesButtonTh.trim(),
+      };
+      onSavePoster(draft).catch(() => {});
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [
+    hideMapSectionDesc,
+    mapBadgeLo,
+    mapBadgeEn,
+    mapBadgeTh,
+    mapTitleLo,
+    mapTitleEn,
+    mapTitleTh,
+    mapDescLo,
+    mapDescEn,
+    mapDescTh,
+    mapButtonLo,
+    mapButtonEn,
+    mapButtonTh,
+    hideStoriesDesc,
+    storiesBadgeLo,
+    storiesBadgeEn,
+    storiesBadgeTh,
+    storiesTitleLo,
+    storiesTitleEn,
+    storiesTitleTh,
+    storiesDescLo,
+    storiesDescEn,
+    storiesDescTh,
+    storiesButtonLo,
+    storiesButtonEn,
+    storiesButtonTh,
+  ]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);

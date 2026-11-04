@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Save,
   RotateCcw,
@@ -238,9 +238,12 @@ export const PrayerSettingsSection: React.FC<PrayerSettingsSectionProps> = ({
     return DEFAULT_PRAYER_ITEMS;
   });
 
+  const isHydratingRef = useRef(false);
+
   // Sync local form state when homePoster updates in real time from Firestore
   useEffect(() => {
     if (!homePoster) return;
+    isHydratingRef.current = true;
     setHidePrayerSection(Boolean(homePoster.hidePrayerSection));
     if (homePoster.prayerBadgeText !== undefined) setBadgeTextLo(homePoster.prayerBadgeText || 'ຫົວຂໍ້ອະທິຖານ');
     if (homePoster.prayerBadgeTextEn !== undefined) setBadgeTextEn(homePoster.prayerBadgeTextEn || 'PRAYER NEEDS');
@@ -272,7 +275,104 @@ export const PrayerSettingsSection: React.FC<PrayerSettingsSectionProps> = ({
     if (homePoster.prayerModalItems && Array.isArray(homePoster.prayerModalItems) && homePoster.prayerModalItems.length > 0) {
       setModalItems(homePoster.prayerModalItems);
     }
+    setTimeout(() => {
+      isHydratingRef.current = false;
+    }, 150);
   }, [homePoster]);
+
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    if (isHydratingRef.current) return;
+
+    const timer = setTimeout(() => {
+      if (isHydratingRef.current) return;
+      const box1 = prayerBoxes[0];
+      const box2 = prayerBoxes[1];
+      const box3 = prayerBoxes[2];
+      const draft: HomePoster = {
+        ...(homePoster || { title: '', subtitle: '', description: '', imageUrl: '' }),
+        hidePrayerSection,
+        prayerBadgeText: badgeTextLo.trim(),
+        prayerBadgeTextEn: badgeTextEn.trim(),
+        prayerBadgeTextTh: badgeTextTh.trim(),
+        prayerTitle: titleLo.trim(),
+        prayerTitleEn: titleEn.trim(),
+        prayerTitleTh: titleTh.trim(),
+        prayerSubtitle: subtitleLo.trim(),
+        prayerSubtitleEn: subtitleEn.trim(),
+        prayerSubtitleTh: subtitleTh.trim(),
+        prayerButtonText: buttonTextLo.trim(),
+        prayerButtonTextEn: buttonTextEn.trim(),
+        prayerButtonTextTh: buttonTextTh.trim(),
+        prayerBgImageUrl: bgImageUrl.trim(),
+        prayerPrayingCountSuffix: countSuffixLo.trim(),
+        prayerPrayingCountSuffixEn: countSuffixEn.trim(),
+        prayerPrayingCountSuffixTh: countSuffixTh.trim(),
+        prayerBoxes,
+        prayerCard1Title: box1 ? box1.title.trim() : '',
+        prayerCard1TitleEn: box1 ? (box1.titleEn || box1.title).trim() : '',
+        prayerCard1TitleTh: box1 ? (box1.titleTh || box1.title).trim() : '',
+        prayerCard1Subtitle: box1 ? box1.subtitle.trim() : '',
+        prayerCard1SubtitleEn: box1 ? (box1.subtitleEn || box1.subtitle).trim() : '',
+        prayerCard1SubtitleTh: box1 ? (box1.subtitleTh || box1.subtitle).trim() : '',
+        prayerCard1Count: box1 ? Number(box1.count) || 0 : 0,
+        prayerCard2Title: box2 ? box2.title.trim() : '',
+        prayerCard2TitleEn: box2 ? (box2.titleEn || box2.title).trim() : '',
+        prayerCard2TitleTh: box2 ? (box2.titleTh || box2.title).trim() : '',
+        prayerCard2Subtitle: box2 ? box2.subtitle.trim() : '',
+        prayerCard2SubtitleEn: box2 ? (box2.subtitleEn || box2.subtitle).trim() : '',
+        prayerCard2SubtitleTh: box2 ? (box2.subtitleTh || box2.subtitle).trim() : '',
+        prayerCard2Count: box2 ? Number(box2.count) || 0 : 0,
+        prayerCard3Title: box3 ? box3.title.trim() : '',
+        prayerCard3TitleEn: box3 ? (box3.titleEn || box3.title).trim() : '',
+        prayerCard3TitleTh: box3 ? (box3.titleTh || box3.title).trim() : '',
+        prayerCard3Subtitle: box3 ? box3.subtitle.trim() : '',
+        prayerCard3SubtitleEn: box3 ? (box3.subtitleEn || box3.subtitle).trim() : '',
+        prayerCard3SubtitleTh: box3 ? (box3.subtitleTh || box3.subtitle).trim() : '',
+        prayerCard3Count: box3 ? Number(box3.count) || 0 : 0,
+        prayerModalTitle: modalTitleLo.trim(),
+        prayerModalTitleEn: modalTitleEn.trim(),
+        prayerModalTitleTh: modalTitleTh.trim(),
+        prayerModalSubtitle: modalSubtitleLo.trim(),
+        prayerModalSubtitleEn: modalSubtitleEn.trim(),
+        prayerModalSubtitleTh: modalSubtitleTh.trim(),
+        prayerModalItems: modalItems,
+      };
+      onSavePoster(draft).catch(() => {});
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [
+    hidePrayerSection,
+    badgeTextLo,
+    badgeTextEn,
+    badgeTextTh,
+    titleLo,
+    titleEn,
+    titleTh,
+    subtitleLo,
+    subtitleEn,
+    subtitleTh,
+    buttonTextLo,
+    buttonTextEn,
+    buttonTextTh,
+    bgImageUrl,
+    countSuffixLo,
+    countSuffixEn,
+    countSuffixTh,
+    prayerBoxes,
+    modalTitleLo,
+    modalTitleEn,
+    modalTitleTh,
+    modalSubtitleLo,
+    modalSubtitleEn,
+    modalSubtitleTh,
+    modalItems,
+  ]);
 
   const handleUpdateModalItem = (index: number, field: keyof PrayerTopicItem, value: any) => {
     setModalItems((prev) => {

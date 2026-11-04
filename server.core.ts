@@ -550,7 +550,7 @@ const srcMinistryDefaultsPath = path.join(process.cwd(), 'src', 'data', 'ministr
 
 function sanitizeHomePosterAssets(poster: any, fallbackPoster: any): any {
   const merged = { ...(fallbackPoster || {}), ...(poster || {}) };
-  if (merged.logoUrl === '/uploads/inline_d892a5b8897e.jpg' || !merged.logoUrl) {
+  if (merged.logoUrl === '/uploads/inline_d892a5b8897e.jpg' || merged.logoUrl === undefined) {
     merged.logoUrl = '/uploads/logo_1791212624840_1791212626418_663.png';
   }
   if (!merged.bokeoImageUrl || merged.bokeoImageUrl.includes('photo-1542601906990-b4d3fb778b09')) {
@@ -563,11 +563,9 @@ function sanitizeHomePosterAssets(poster: any, fallbackPoster: any): any {
     merged.videoUrl = '';
   }
   if (
-    Array.isArray(merged.bokeoTimeline) &&
-    merged.bokeoTimeline.length === 3 &&
-    !merged.bokeoTimeline.some((t: any) => t.id === 'timeline-2022' || (t.imageUrl && t.imageUrl.includes('timeline_2_0'))) &&
+    (!Array.isArray(merged.bokeoTimeline) || merged.bokeoTimeline.length === 0) &&
     Array.isArray(fallbackPoster?.bokeoTimeline) &&
-    fallbackPoster.bokeoTimeline.length >= 4
+    fallbackPoster.bokeoTimeline.length > 0
   ) {
     merged.bokeoTimeline = fallbackPoster.bokeoTimeline;
   }
@@ -640,7 +638,7 @@ let dbData: {
 
 let lastMinistryFirestoreSyncAt = 0;
 let lastFinanceFirestoreSyncAt = 0;
-const FIRESTORE_SYNC_TTL_MS = 120 * 1000; // 2 minutes TTL to avoid exhausting Firestore read quota
+const FIRESTORE_SYNC_TTL_MS = 5 * 1000; // 5 seconds TTL so server always reflects fresh Firestore updates
 
 // Load live data from Firestore on server startup (merging with disk ledger)
 loadFirestoreData().then((data) => {

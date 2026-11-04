@@ -407,8 +407,11 @@ export const AdminTab: React.FC<AdminTabProps> = ({
     setIsEditingDonation(true);
   };
 
+  const isHydratingFromPropsRef = useRef(false);
+
   useEffect(() => {
     if (donationInfo) {
+      isHydratingFromPropsRef.current = true;
       const defaults = (initialDefaultDonationBankAccounts as BankAccount[]) || [];
       if (donationInfo.bankName) setDonationBankName(donationInfo.bankName);
       if (donationInfo.accountName) setDonationAccountName(donationInfo.accountName);
@@ -455,6 +458,9 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       else if (donationInfo.hidden !== undefined) setHideDonationSectionState(donationInfo.hidden);
       if (donationInfo.hideVisionMission !== undefined) setHideVisionMissionState(donationInfo.hideVisionMission);
       if (donationInfo.hidePrayerLine !== undefined) setHidePrayerLineState(donationInfo.hidePrayerLine);
+      setTimeout(() => {
+        isHydratingFromPropsRef.current = false;
+      }, 150);
     }
   }, [donationInfo]);
 
@@ -1021,6 +1027,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
 
   useEffect(() => {
     if (homePoster) {
+      isHydratingFromPropsRef.current = true;
       if (homePoster.title) {
         setPosterTitle(homePoster.title === 'ປະກາດຂ່າວປະເສີດ ແລະ ສ້າງສາວົກ' ? 'Hope is growing in Bokeo.' : homePoster.title);
       }
@@ -1168,6 +1175,9 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       if (homePoster.missionEn !== undefined) setDonationMissionEn(homePoster.missionEn);
       if (homePoster.missionTh !== undefined) setDonationMissionTh(homePoster.missionTh);
       if (homePoster.hideVisionMission !== undefined) setHideVisionMissionState(homePoster.hideVisionMission);
+      setTimeout(() => {
+        isHydratingFromPropsRef.current = false;
+      }, 150);
     }
   }, [homePoster]);
 
@@ -1470,6 +1480,282 @@ export const AdminTab: React.FC<AdminTabProps> = ({
   const [inputFinanceCode, setInputFinanceCode] = useState<string>('');
   const [showFinanceCode, setShowFinanceCode] = useState<boolean>(false);
   const [financeCodeError, setFinanceCodeError] = useState<string>('');
+
+  // Real-time debounced auto-sync for Poster & Upcoming Event settings when unlocked in Admin Panel
+  useEffect(() => {
+    if (!isSettingsUnlocked || isHydratingFromPropsRef.current) return;
+    if (adminSubTab !== 'poster' && adminSubTab !== 'upcoming') return;
+
+    const timer = setTimeout(() => {
+      if (isHydratingFromPropsRef.current) return;
+      const finalCoverList =
+        Array.isArray(posterImageUrls) && posterImageUrls.length > 0
+          ? posterImageUrls.filter((u) => typeof u === 'string' && u.trim())
+          : posterImgUrl && posterImgUrl.trim()
+          ? [posterImgUrl.trim()]
+          : [];
+
+      const draft: HomePoster = {
+        ...(homePoster || {}),
+        title: posterTitle,
+        titleEn: posterTitleEn,
+        titleTh: posterTitleTh,
+        subtitle: posterSubtitle,
+        subtitleEn: posterSubtitleEn,
+        subtitleTh: posterSubtitleTh,
+        description: posterDesc,
+        descriptionEn: posterDescEn,
+        descriptionTh: posterDescTh,
+        imageUrl: finalCoverList[0] || '',
+        imageUrls: finalCoverList,
+        videoUrl: posterVideoUrl,
+        buttonText: posterBtnText,
+        buttonTextEn: posterBtnTextEn,
+        buttonTextTh: posterBtnTextTh,
+        posterLocationTag: posterLocationTag.trim(),
+        posterLocationTagEn: posterLocationTagEn.trim(),
+        posterLocationTagTh: posterLocationTagTh.trim(),
+        videoBtnText: posterVideoBtnText.trim(),
+        videoBtnTextEn: posterVideoBtnTextEn.trim(),
+        videoBtnTextTh: posterVideoBtnTextTh.trim(),
+        badgeTopText: posterBadgeTopText.trim(),
+        badgeTopTextEn: posterBadgeTopTextEn.trim(),
+        badgeTopTextTh: posterBadgeTopTextTh.trim(),
+        badgeBottomText: posterBadgeBottomText.trim(),
+        badgeBottomTextEn: posterBadgeBottomTextEn.trim(),
+        badgeBottomTextTh: posterBadgeBottomTextTh.trim(),
+        hideRightBadge: hideRightBadge,
+        upcomingEventTitle: upcomingEventTitle.trim(),
+        upcomingEventTitleEn: upcomingEventTitleEn.trim(),
+        upcomingEventTitleTh: upcomingEventTitleTh.trim(),
+        upcomingEventDate: upcomingEventDate.trim(),
+        upcomingEventLocation: upcomingEventLocation.trim(),
+        upcomingEventLocationEn: upcomingEventLocationEn.trim(),
+        upcomingEventLocationTh: upcomingEventLocationTh.trim(),
+        upcomingEventDesc: upcomingEventDesc.trim(),
+        upcomingEventDescEn: upcomingEventDescEn.trim(),
+        upcomingEventDescTh: upcomingEventDescTh.trim(),
+        upcomingEventImageUrl: upcomingEventImageUrl.trim(),
+        upcomingEventBadge: upcomingEventBadge.trim(),
+        hideUpcomingEvent: hideUpcomingEvent,
+        upcomingSchedule: upcomingSchedule || [],
+        upcomingScheduleHtml: (upcomingScheduleHtml || '').trim(),
+        upcomingPdfUrl: (upcomingPdfUrl || '').trim(),
+        upcomingPdfName: (upcomingPdfName || '').trim(),
+        upcomingDocxUrl: (upcomingDocxUrl || '').trim(),
+        upcomingDocxName: (upcomingDocxName || '').trim(),
+        upcomingBgDim: Number(upcomingBgDim),
+        upcomingEdgeFade: Number(upcomingEdgeFade),
+        upcomingHeight: Number(upcomingHeight),
+        upcomingContentBgOpacity: Number(upcomingContentBgOpacity),
+        upcomingTitleSize: upcomingTitleSize,
+        upcomingBgVisibility: Number(upcomingBgVisibility),
+        upcomingTableWidth: Number(upcomingTableWidth),
+        upcomingTableAlign: upcomingTableAlign,
+        upcomingTableBg: upcomingTableBg,
+        upcomingTableCustomBg: (upcomingTableCustomBg || '').trim(),
+        upcomingTableBorderWidth: Number(upcomingTableBorderWidth),
+        upcomingTableBorderColor: (upcomingTableBorderColor || '').trim(),
+        bgColor: appBgColor,
+        bgImageUrl: appBgImageUrl,
+        bgBrightness: Number(appBgBrightness),
+        bgBlur: Number(appBgBlur),
+        bgWhiteOverlayOpacity: Number(appBgWhiteOverlayOpacity),
+        bgWhiteOpacity: Number(appBgWhiteOverlayOpacity),
+        logoUrl: orgLogoUrl,
+        bgPosition: posterBgPosition,
+        bgPositions: posterBgPositions,
+        imageCustomSettings: imageCustomSettings,
+        posterHeight: posterHeight,
+        posterScale: Number(posterScale) || 100,
+        posterFit: posterFit,
+        posterAspectRatio: posterAspectRatio,
+        posterBrightness: Number(posterBrightness),
+        posterContrast: Number(posterContrast),
+        posterSaturation: Number(posterSaturation),
+        posterBlur: Number(posterBlur),
+        posterOverlayOpacity: Number(posterOverlayOpacity),
+        posterEdgeFade: Number(posterEdgeFade),
+        hidden: hidePosterSection,
+        hidePoster: hidePosterSection,
+        hideTextOverlay: !showTextOverlay,
+        showTextOverlay: showTextOverlay,
+      };
+
+      if (onSaveHomePoster) {
+        onSaveHomePoster(draft).catch(() => {});
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [
+    isSettingsUnlocked,
+    adminSubTab,
+    posterTitle,
+    posterTitleEn,
+    posterTitleTh,
+    posterSubtitle,
+    posterSubtitleEn,
+    posterSubtitleTh,
+    posterDesc,
+    posterDescEn,
+    posterDescTh,
+    posterImgUrl,
+    posterImageUrls,
+    posterVideoUrl,
+    posterBtnText,
+    posterBtnTextEn,
+    posterBtnTextTh,
+    posterLocationTag,
+    posterLocationTagEn,
+    posterLocationTagTh,
+    posterVideoBtnText,
+    posterVideoBtnTextEn,
+    posterVideoBtnTextTh,
+    posterBadgeTopText,
+    posterBadgeTopTextEn,
+    posterBadgeTopTextTh,
+    posterBadgeBottomText,
+    posterBadgeBottomTextEn,
+    posterBadgeBottomTextTh,
+    hideRightBadge,
+    upcomingEventTitle,
+    upcomingEventTitleEn,
+    upcomingEventTitleTh,
+    upcomingEventDate,
+    upcomingEventLocation,
+    upcomingEventLocationEn,
+    upcomingEventLocationTh,
+    upcomingEventDesc,
+    upcomingEventDescEn,
+    upcomingEventDescTh,
+    upcomingEventImageUrl,
+    upcomingEventBadge,
+    hideUpcomingEvent,
+    upcomingSchedule,
+    upcomingScheduleHtml,
+    upcomingPdfUrl,
+    upcomingPdfName,
+    upcomingDocxUrl,
+    upcomingDocxName,
+    upcomingBgDim,
+    upcomingEdgeFade,
+    upcomingHeight,
+    upcomingContentBgOpacity,
+    upcomingTitleSize,
+    upcomingBgVisibility,
+    upcomingTableWidth,
+    upcomingTableAlign,
+    upcomingTableBg,
+    upcomingTableCustomBg,
+    upcomingTableBorderWidth,
+    upcomingTableBorderColor,
+    appBgColor,
+    appBgImageUrl,
+    appBgBrightness,
+    appBgBlur,
+    appBgWhiteOverlayOpacity,
+    orgLogoUrl,
+    posterBgPosition,
+    posterBgPositions,
+    imageCustomSettings,
+    posterHeight,
+    posterScale,
+    posterFit,
+    posterAspectRatio,
+    posterBrightness,
+    posterContrast,
+    posterSaturation,
+    posterBlur,
+    posterOverlayOpacity,
+    posterEdgeFade,
+    hidePosterSection,
+    showTextOverlay,
+  ]);
+
+  // Real-time debounced auto-sync for Donation & Prayer Channels when unlocked in Admin Panel
+  useEffect(() => {
+    if (!isSettingsUnlocked || isHydratingFromPropsRef.current) return;
+    if (adminSubTab !== 'donation') return;
+
+    const timer = setTimeout(() => {
+      if (isHydratingFromPropsRef.current) return;
+      const cleanBankAccounts = (donationBankAccounts || []).map((acc) => ({
+        ...acc,
+        bankName: acc.bankName || '',
+        bankNameEn: acc.bankNameEn || '',
+        bankNameTh: acc.bankNameTh || '',
+        accountName: acc.accountName || '',
+        accountNumber: acc.accountNumber || '',
+        swiftCode: acc.swiftCode || '',
+        qrImageUrl: acc.qrImageUrl || '',
+        hidden: Boolean(acc.hidden),
+      }));
+
+      const draft: DonationInfo = {
+        bankName: cleanBankAccounts[0]?.bankName || donationBankName || '',
+        bankNameEn: cleanBankAccounts[0]?.bankNameEn || '',
+        bankNameTh: cleanBankAccounts[0]?.bankNameTh || '',
+        accountName: cleanBankAccounts[0]?.accountName || donationAccountName || '',
+        accountNumber: cleanBankAccounts[0]?.accountNumber || donationAccountNumber || '',
+        swiftCode: cleanBankAccounts[0]?.swiftCode || donationSwiftCode || '',
+        qrImageUrl: cleanBankAccounts[0]?.qrImageUrl || donationQrImageUrl || '',
+        bankAccounts: cleanBankAccounts,
+        prayerContactPhone: donationPhone || '',
+        prayerContactWhatsapp: donationWhatsapp || '',
+        prayerContactEmail: donationEmail || '',
+        supportNote: donationSupportNote || '',
+        supportNoteEn: donationSupportNoteEn || '',
+        supportNoteTh: donationSupportNoteTh || '',
+        purposeDesc: donationPurposeDesc || '',
+        purposeDescEn: donationPurposeDescEn || '',
+        purposeDescTh: donationPurposeDescTh || '',
+        vision: donationVision || '',
+        visionEn: donationVisionEn || '',
+        visionTh: donationVisionTh || '',
+        mission: donationMission || '',
+        missionEn: donationMissionEn || '',
+        missionTh: donationMissionTh || '',
+        hidden: Boolean(hideDonationSectionState),
+        hideDonationSection: Boolean(hideDonationSectionState),
+        hideVisionMission: Boolean(hideVisionMissionState),
+        hidePrayerLine: Boolean(hidePrayerLineState),
+      };
+
+      if (onSaveDonationInfo) {
+        onSaveDonationInfo(draft).catch(() => {});
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [
+    isSettingsUnlocked,
+    adminSubTab,
+    donationBankAccounts,
+    donationBankName,
+    donationAccountName,
+    donationAccountNumber,
+    donationSwiftCode,
+    donationQrImageUrl,
+    donationPhone,
+    donationWhatsapp,
+    donationEmail,
+    donationSupportNote,
+    donationSupportNoteEn,
+    donationSupportNoteTh,
+    donationPurposeDesc,
+    donationPurposeDescEn,
+    donationPurposeDescTh,
+    donationVision,
+    donationVisionEn,
+    donationVisionTh,
+    donationMission,
+    donationMissionEn,
+    donationMissionTh,
+    hideDonationSectionState,
+    hideVisionMissionState,
+    hidePrayerLineState,
+  ]);
 
   const handleLockSettings = () => {
     setIsSettingsUnlocked(false);

@@ -66,6 +66,7 @@ import {
 } from '../lib/firestore-service';
 import { UnifiedMediaUploader } from './UnifiedMediaUploader';
 import { generateQRCodeDataUrl } from '../utils/qrCode';
+import { db, collection, doc, onSnapshot } from '../lib/firebase';
 
 export interface ParsedBatchMeta {
   round: number;
@@ -545,6 +546,94 @@ export const FinanceTab: React.FC<FinanceTabProps> = ({
 
   useEffect(() => {
     fetchFinance();
+
+    let unsubDonations: (() => void) | undefined;
+    let unsubDistributions: (() => void) | undefined;
+    let unsubQrMembers: (() => void) | undefined;
+    let unsubFinanceSettings: (() => void) | undefined;
+
+    try {
+      unsubDonations = onSnapshot(
+        collection(db, 'donations_ledger'),
+        (snap) => {
+          if (!snap.empty) {
+            const list = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() } as DonationTransaction))
+              .sort((a, b) =>
+                String((b as any).createdAt || b.date || '').localeCompare(
+                  String((a as any).createdAt || a.date || '')
+                )
+              );
+            setDonations(list);
+            try {
+              localStorage.setItem('hb_cached_donations', JSON.stringify(list));
+            } catch {}
+          }
+        },
+        () => {}
+      );
+
+      unsubDistributions = onSnapshot(
+        collection(db, 'team_distributions'),
+        (snap) => {
+          if (!snap.empty) {
+            const list = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() } as TeamDistribution))
+              .sort((a, b) =>
+                String((b as any).createdAt || b.transferDate || '').localeCompare(
+                  String((a as any).createdAt || a.transferDate || '')
+                )
+              );
+            setDistributions(list);
+            try {
+              localStorage.setItem('hb_cached_distributions', JSON.stringify(list));
+            } catch {}
+          }
+        },
+        () => {}
+      );
+
+      unsubQrMembers = onSnapshot(
+        collection(db, 'finance_qr_members'),
+        (snap) => {
+          if (!snap.empty) {
+            const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as FinanceQrMember));
+            setQrMembers(list);
+            try {
+              localStorage.setItem('hb_cached_qr_members', JSON.stringify(list));
+            } catch {}
+          }
+        },
+        () => {}
+      );
+
+      unsubFinanceSettings = onSnapshot(
+        doc(db, 'app_config', 'financeSettings'),
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (typeof data?.emergencyReservePercent === 'number') {
+              const p = Math.min(100, Math.max(0, Number(data.emergencyReservePercent)));
+              setEmergencyPercent(p);
+              setTempPercentInput(String(p));
+              try {
+                localStorage.setItem('hb_cached_finance_settings', JSON.stringify({ emergencyReservePercent: p }));
+              } catch {}
+            }
+          }
+        },
+        () => {}
+      );
+    } catch (e) {
+      console.warn('FinanceTab realtime subscription notice:', e);
+    }
+
+    return () => {
+      if (unsubDonations) unsubDonations();
+      if (unsubDistributions) unsubDistributions();
+      if (unsubQrMembers) unsubQrMembers();
+      if (unsubFinanceSettings) unsubFinanceSettings();
+    };
   }, [teams]);
 
   // Save Configured Percentage (Default for new entries)

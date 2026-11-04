@@ -145,8 +145,11 @@ export const InsightsPosterSettingsSection: React.FC<InsightsPosterSettingsSecti
     homePoster?.insightsVerseRefTh || '1 พงศาวดาร 16:34'
   );
 
+  const isHydratingRef = useRef(false);
+
   useEffect(() => {
     if (!homePoster) return;
+    isHydratingRef.current = true;
     if (homePoster.hideInsightsPoster !== undefined)
       setHideInsightsPoster(homePoster.hideInsightsPoster);
     if (homePoster.insightsImageUrl !== undefined)
@@ -192,7 +195,77 @@ export const InsightsPosterSettingsSection: React.FC<InsightsPosterSettingsSecti
       setInsightsVerseRefEn(homePoster.insightsVerseRefEn);
     if (homePoster.insightsVerseRefTh !== undefined && homePoster.insightsVerseRefTh !== '')
       setInsightsVerseRefTh(homePoster.insightsVerseRefTh);
+
+    setTimeout(() => {
+      isHydratingRef.current = false;
+    }, 150);
   }, [homePoster]);
+
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    if (isHydratingRef.current) return;
+
+    const timer = setTimeout(() => {
+      if (isHydratingRef.current) return;
+      const draft: HomePoster = {
+        title: homePoster?.title || 'HOPE BOKEO',
+        subtitle: homePoster?.subtitle || '',
+        description: homePoster?.description || '',
+        imageUrl: homePoster?.imageUrl || '',
+        ...(homePoster || {}),
+        hideInsightsPoster,
+        insightsImageUrl: (insightsImageUrl || '').trim(),
+        insightsPosterHeight: Number(insightsPosterHeight),
+        insightsPosterOverlayOpacity: Number(insightsPosterOverlayOpacity),
+        insightsPosterEdgeFade: Number(insightsPosterEdgeFade),
+        insightsPosterDim: Number(insightsPosterDim),
+        insightsPosterScale: Number(insightsPosterScale) || 100,
+        insightsPosterPosition,
+        insightsPosterFit,
+        insightsTitle: insightsTitleLo.trim(),
+        insightsTitleEn: insightsTitleEn.trim(),
+        insightsTitleTh: insightsTitleTh.trim(),
+        insightsSubtitle: insightsSubtitleLo.trim(),
+        insightsSubtitleEn: insightsSubtitleEn.trim(),
+        insightsSubtitleTh: insightsSubtitleTh.trim(),
+        insightsVerse: insightsVerseLo.trim(),
+        insightsVerseEn: insightsVerseEn.trim(),
+        insightsVerseTh: insightsVerseTh.trim(),
+        insightsVerseRef: insightsVerseRefLo.trim(),
+        insightsVerseRefEn: insightsVerseRefEn.trim(),
+        insightsVerseRefTh: insightsVerseRefTh.trim(),
+      };
+      onSavePoster(draft).catch(() => {});
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [
+    hideInsightsPoster,
+    insightsImageUrl,
+    insightsPosterHeight,
+    insightsPosterOverlayOpacity,
+    insightsPosterEdgeFade,
+    insightsPosterDim,
+    insightsPosterScale,
+    insightsPosterPosition,
+    insightsPosterFit,
+    insightsTitleLo,
+    insightsTitleEn,
+    insightsTitleTh,
+    insightsSubtitleLo,
+    insightsSubtitleEn,
+    insightsSubtitleTh,
+    insightsVerseLo,
+    insightsVerseEn,
+    insightsVerseTh,
+    insightsVerseRefLo,
+    insightsVerseRefEn,
+    insightsVerseRefTh,
+  ]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
